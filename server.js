@@ -111,29 +111,20 @@ app.get('/api/history', (req, res) => {
         since = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
     }
 
-    // For MAX, sample data to avoid sending too many points
+    // For MAX/1Y, aggregate to weekly averages for smooth chart lines
     let readings;
-    if (range === 'MAX') {
-      // Sample ~2000 points evenly
-      const total = db.prepare('SELECT COUNT(*) as c FROM readings WHERE timestamp >= ?').get(since).c;
-      if (total > 2000) {
-        const nth = Math.ceil(total / 2000);
-        readings = db.prepare(`
-          SELECT timestamp, value, wti_price, brent_price 
-          FROM readings 
-          WHERE timestamp >= ? AND id % ? = 0
-          ORDER BY timestamp ASC
-        `).all(since, nth);
-      } else {
-        readings = db.prepare(
-          'SELECT timestamp, value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
-        ).all(since);
-      }
-    } else if (range === '1Y') {
-      // For 1Y, daily data — keep all
-      readings = db.prepare(
-        'SELECT timestamp, value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
-      ).all(since);
+    if (range === 'MAX' || range === '1Y') {
+      readings = db.prepare(`
+        SELECT 
+          MIN(timestamp) as timestamp,
+          ROUND(AVG(value), 2) as value,
+          ROUND(AVG(wti_price), 2) as wti_price,
+          ROUND(AVG(brent_price), 2) as brent_price
+        FROM readings 
+        WHERE timestamp >= ?
+        GROUP BY strftime('%Y-%W', timestamp)
+        ORDER BY timestamp ASC
+      `).all(since);
     } else {
       readings = db.prepare(
         'SELECT timestamp, value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
