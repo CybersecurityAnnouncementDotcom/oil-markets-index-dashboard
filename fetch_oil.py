@@ -38,7 +38,7 @@ def fetch_prices():
         
         # Calculate composite index
         composite = (wti_price * 0.4) + (brent_price * 0.6)
-        index_value = round((composite / 147.0) * 50000, 2)
+        index_value = round((composite / 147.0) * 5000, 2)
         
         result = {
             "wti_price": round(wti_price, 2),

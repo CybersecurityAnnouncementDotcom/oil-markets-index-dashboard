@@ -84,7 +84,7 @@ def backfill():
         else:
             composite = (wti_price * 0.4) + (brent_price * 0.6)
         
-        index_value = round((composite / 147.0) * 50000, 2)
+        index_value = round((composite / 147.0) * 5000, 2)
         timestamp = date.strftime('%Y-%m-%dT16:00:00.000Z')
         
         batch.append((timestamp, index_value, wti_price, brent_price))
