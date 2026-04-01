@@ -1,3 +1,5 @@
 node_modules/
 deploy/
 *.log
+*.db-shm
+*.db-wal
