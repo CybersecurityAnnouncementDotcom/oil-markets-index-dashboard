@@ -155,7 +155,7 @@ app.get('/api/sp500-history', (req, res) => {
       case '1Y': since = new Date(now - 365 * 86400000); break;
       default: since = new Date('2000-01-01');
     }
-    const rows = worldDb.prepare('SELECT timestamp, value FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC').all(since.toISOString().split('T')[0]);
+    const rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since.toISOString().split('T')[0]);
     worldDb.close();
     res.json({ readings: rows });
   } catch(err) {
