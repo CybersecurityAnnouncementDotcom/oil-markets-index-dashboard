@@ -125,6 +125,11 @@ app.get('/api/history', (req, res) => {
         GROUP BY strftime('%Y-%W', timestamp)
         ORDER BY timestamp ASC
       `).all(since);
+      // Append the very latest reading so the chart extends to today
+      const latestReading = db.prepare('SELECT timestamp, value, wti_price, brent_price FROM readings ORDER BY timestamp DESC LIMIT 1').get();
+      if (latestReading && (readings.length === 0 || readings[readings.length - 1].timestamp !== latestReading.timestamp)) {
+        readings.push(latestReading);
+      }
     } else {
       readings = db.prepare(
         'SELECT timestamp, value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
@@ -175,9 +180,9 @@ app.post('/api/readings', (req, res) => {
       return res.status(400).json({ error: 'Rejected: >20% drop (glitch protection)' });
     }
 
-    // Duplicate prevention: only store if value changed by >0.5
-    if (last && Math.abs(value - last.value) < 0.5) {
-      return res.json({ status: 'skipped', reason: 'value change < 0.5' });
+    // Duplicate prevention: only store if value changed by >0.01
+    if (last && Math.abs(value - last.value) < 0.01) {
+      return res.json({ status: 'skipped', reason: 'value change < 0.01' });
     }
 
     const timestamp = new Date().toISOString();
@@ -213,7 +218,7 @@ function fetchAndStore() {
     }
 
     // Duplicate prevention
-    if (last && Math.abs(data.index_value - last.value) < 0.5) {
+    if (last && Math.abs(data.index_value - last.value) < 0.01) {
       return;
     }
 
