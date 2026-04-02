@@ -797,7 +797,7 @@
               pointHoverRadius: 3,
               tension: 0.2,
               fill: false,
-              yAxisID: 'y',
+              yAxisID: 'y2',
               order: 2
             }
           ]
@@ -857,7 +857,7 @@
               },
               border: { display: false }
             },
-            // Shared Y-axis: Oil Markets Index and S&P 500 (~3000–5000 range)
+            // Left Y-axis: Oil Markets Index
             y: {
               position: 'left',
               grid: {
@@ -865,7 +865,21 @@
                 drawBorder: false
               },
               ticks: {
-                color: '#5a586a',
+                color: '#f0a030',
+                font: { family: "'DM Mono'", size: 11 },
+                callback: v => v.toLocaleString('en-US', { maximumFractionDigits: 0 })
+              },
+              beginAtZero: false,
+              border: { display: false }
+            },
+            // Right Y-axis: S&P 500
+            y2: {
+              position: 'right',
+              grid: {
+                drawOnChartArea: false
+              },
+              ticks: {
+                color: '#6eb5ff',
                 font: { family: "'DM Mono'", size: 11 },
                 callback: v => v.toLocaleString('en-US', { maximumFractionDigits: 0 })
               },
