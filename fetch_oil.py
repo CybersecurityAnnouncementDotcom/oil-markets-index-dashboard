@@ -37,7 +37,7 @@ def fetch_prices():
             brent_price = wti_price
         
         # Calculate composite index
-        composite = (wti_price * 0.4) + (brent_price * 0.6)
+        composite = (wti_price * 0.3) + (brent_price * 0.7)
         index_value = round((composite / 147.0) * 5000, 2)
         
         result = {

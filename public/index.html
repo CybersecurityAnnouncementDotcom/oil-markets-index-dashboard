@@ -472,10 +472,7 @@
             <span class="subtitle">Composite WTI + Brent</span>
           </div>
         </div>
-        <div class="header-right">
-          <span class="live-dot" id="liveDot"></span>
-          <span class="market-status" id="marketStatus">Market Open</span>
-        </div>
+        <!-- market status removed -->
       </div>
     </header>
 
@@ -516,11 +513,7 @@
         </div>
         <div class="legend-item">
           <span class="legend-line" style="background: #6eb5ff;"></span>
-          WTI Crude
-        </div>
-        <div class="legend-item">
-          <span class="legend-line" style="background: #e07a3a;"></span>
-          Brent Crude
+          S&amp;P 500
         </div>
       </div>
     </div>
@@ -604,80 +597,6 @@
         hour12: true
       });
       return `Updated ${pdt} PDT / Stanford University Time`;
-    }
-
-    // ── Market Open/Close Status (Issue 10) ──
-    // CME oil futures: Sun 5PM CT – Fri 4PM CT, with daily break 4PM–5PM CT
-    // CT = UTC-5 during CDT (summer), UTC-6 during CST (winter)
-    // Open window: Sun 22:00 UTC – Fri 21:00 UTC (CDT), daily break 21:00–22:00 UTC
-    function isOilMarketOpen() {
-      const now = new Date();
-      const utcDay = now.getUTCDay();    // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
-      const utcHour = now.getUTCHours();
-      const utcMin = now.getUTCMinutes();
-      const utcMinutes = utcHour * 60 + utcMin;
-
-      // Determine CT offset: CDT = UTC-5, CST = UTC-6
-      // Approximate DST: second Sunday of March to first Sunday of November
-      const year = now.getUTCFullYear();
-      const dstStart = getNthSundayUTC(year, 2, 2);  // 2nd Sunday of March, 7:00 UTC (2AM EST)
-      const dstEnd = getNthSundayUTC(year, 10, 1);   // 1st Sunday of November, 6:00 UTC (2AM EDT)
-      const isDST = now >= dstStart && now < dstEnd;
-      const ctOffsetHours = isDST ? 5 : 6; // hours behind UTC
-
-      // Convert current UTC time to CT minutes since midnight
-      let ctMinutes = utcMinutes - (ctOffsetHours * 60);
-      let ctDay = utcDay;
-      if (ctMinutes < 0) {
-        ctMinutes += 1440;
-        ctDay = (ctDay + 6) % 7;  // go back one day
-      }
-
-      // Market opens Sunday 5:00 PM CT = 17*60 = 1020 minutes
-      // Market closes Friday 4:00 PM CT = 16*60 = 960 minutes
-      // Daily break: 4:00 PM CT (960) to 5:00 PM CT (1020) every day
-
-      // Saturday is always closed
-      if (ctDay === 6) return false;
-
-      // Friday: open until 4:00 PM CT (960 min), closed after
-      if (ctDay === 5) {
-        return ctMinutes < 960;
-      }
-
-      // Sunday: open from 5:00 PM CT (1020 min) through midnight
-      if (ctDay === 0) {
-        return ctMinutes >= 1020;
-      }
-
-      // Monday–Thursday: open all day except 4:00–5:00 PM CT (daily break)
-      // Daily break: 960–1020 minutes
-      return !(ctMinutes >= 960 && ctMinutes < 1020);
-    }
-
-    function getNthSundayUTC(year, month, n) {
-      // month: 1=Jan, 2=Feb, ... 10=Oct, 11=Nov
-      // n: which Sunday (1=first, 2=second)
-      const date = new Date(Date.UTC(year, month - 1, 1, 7, 0, 0)); // 7:00 UTC
-      const dayOfWeek = date.getUTCDay();
-      const daysUntilSunday = (7 - dayOfWeek) % 7;
-      date.setUTCDate(1 + daysUntilSunday + (n - 1) * 7);
-      return date;
-    }
-
-    function updateMarketStatus() {
-      const open = isOilMarketOpen();
-      const dotEl = document.getElementById('liveDot');
-      const statusEl = document.getElementById('marketStatus');
-      if (open) {
-        dotEl.className = 'live-dot';
-        statusEl.className = 'market-status';
-        statusEl.textContent = 'Market Open';
-      } else {
-        dotEl.className = 'live-dot closed';
-        statusEl.className = 'market-status closed';
-        statusEl.textContent = 'Market Closed';
-      }
     }
 
     // ── Fetch current data ──
@@ -815,14 +734,35 @@
       }
     }
 
-    function buildChart(readings) {
+    async function fetchSP500History(range) {
+      try {
+        const res = await fetch(`/api/sp500-history?range=${range}`);
+        const data = await res.json();
+        return data.readings || [];
+      } catch (err) {
+        console.error('Fetch S&P 500 history error:', err);
+        return [];
+      }
+    }
+
+    function buildChart(readings, sp500Readings) {
       const ctx = document.getElementById('priceChart').getContext('2d');
 
       const labels = readings.map(r => new Date(r.timestamp));
       const indexData = readings.map(r => r.value);
-      // Issue 11: Use actual dollar prices for WTI and Brent (not scaled)
-      const wtiData = readings.map(r => r.wti_price);
-      const brentData = readings.map(r => r.brent_price);
+
+      // Map S&P 500 data onto the same time axis as oil data (align by date prefix)
+      // Build a lookup: date string (YYYY-MM-DD) -> sp500 value
+      const sp500ByDate = {};
+      for (const r of sp500Readings) {
+        const dateKey = r.timestamp.slice(0, 10);
+        sp500ByDate[dateKey] = r.value;
+      }
+      // For each oil reading timestamp, find matching S&P 500 value by date
+      const sp500Data = readings.map(r => {
+        const dateKey = new Date(r.timestamp).toISOString().slice(0, 10);
+        return sp500ByDate[dateKey] !== undefined ? sp500ByDate[dateKey] : null;
+      });
 
       if (chart) chart.destroy();
 
@@ -849,29 +789,16 @@
               order: 1
             },
             {
-              // Issue 6: WTI is solid (no borderDash), Issue 11: raw prices on y2
-              label: 'WTI Crude',
-              data: wtiData,
+              label: 'S&P 500',
+              data: sp500Data,
               borderColor: '#6eb5ff',
               borderWidth: 1.5,
               pointRadius: 0,
               pointHoverRadius: 3,
-              tension: 0.3,
+              tension: 0.2,
               fill: false,
-              yAxisID: 'y2',
+              yAxisID: 'y',
               order: 2
-            },
-            {
-              label: 'Brent Crude',
-              data: brentData,
-              borderColor: '#e07a3a',
-              borderWidth: 1.5,
-              pointRadius: 0,
-              pointHoverRadius: 3,
-              tension: 0.3,
-              fill: false,
-              yAxisID: 'y2',
-              order: 3
             }
           ]
         },
@@ -902,12 +829,10 @@
                 const d = new Date(tt.dataPoints[0].parsed.x);
                 const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
                 let html = `<div style="color:#8a7e68;font-size:11px;margin-bottom:4px;font-family:DM Sans,sans-serif">${dateStr}</div>`;
-                html += `<div style="color:#d4af37;font-weight:600">Composite: ${formatIndex(reading.value)}</div>`;
-                if (reading.wti_price != null) {
-                  html += `<div style="color:#6eb5ff;margin-top:2px">WTI: $${formatNumber(reading.wti_price)}</div>`;
-                }
-                if (reading.brent_price != null) {
-                  html += `<div style="color:#e07a3a;margin-top:1px">Brent: $${formatNumber(reading.brent_price)}</div>`;
+                html += `<div style="color:#d4af37;font-weight:600">Oil Index: ${formatIndex(reading.value)}</div>`;
+                const sp500Val = sp500Data[idx];
+                if (sp500Val != null) {
+                  html += `<div style="color:#6eb5ff;margin-top:2px">S&P 500: ${formatIndex(sp500Val)}</div>`;
                 }
                 el.innerHTML = html;
                 el.style.opacity = '1';
@@ -932,7 +857,7 @@
               },
               border: { display: false }
             },
-            // Left Y-axis: Oil Markets Index composite (~3300–5000 range)
+            // Shared Y-axis: Oil Markets Index and S&P 500 (~3000–5000 range)
             y: {
               position: 'left',
               grid: {
@@ -946,20 +871,6 @@
               },
               beginAtZero: false,
               border: { display: false }
-            },
-            // Right Y-axis: Actual WTI & Brent prices in USD
-            y2: {
-              position: 'right',
-              grid: {
-                drawOnChartArea: false
-              },
-              ticks: {
-                color: '#5a586a',
-                font: { family: "'DM Mono'", size: 11 },
-                callback: v => '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 })
-              },
-              beginAtZero: false,
-              border: { display: false }
             }
           }
         }
@@ -968,8 +879,11 @@
 
     async function updateChart(range) {
       currentRange = range;
-      const readings = await fetchHistory(range);
-      buildChart(readings);
+      const [readings, sp500Readings] = await Promise.all([
+        fetchHistory(range),
+        fetchSP500History(range)
+      ]);
+      buildChart(readings, sp500Readings);
     }
 
     // ── Range toggle buttons ──
@@ -986,7 +900,6 @@
       if (refreshTimer) clearInterval(refreshTimer);
       refreshTimer = setInterval(() => {
         fetchCurrent();
-        updateMarketStatus();
         if (currentRange === '1H' || currentRange === '1D') {
           updateChart(currentRange);
         }
@@ -995,10 +908,6 @@
 
     // ── Init ──
     async function init() {
-      updateMarketStatus();
-      // Update market status every minute
-      setInterval(updateMarketStatus, 60000);
-
       await fetchCurrent();
       await updateChart('MAX');
       // Set MAX button as active on load
