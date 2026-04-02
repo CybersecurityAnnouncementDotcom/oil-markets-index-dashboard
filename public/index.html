@@ -511,7 +511,7 @@
           <span class="legend-line" style="background: #f0a030;"></span>
           Oil Markets Index
         </div>
-        <div class="legend-item">
+        <div class="legend-item" id="sp500Legend">
           <span class="legend-line" style="background: #6eb5ff;"></span>
           S&amp;P 500
         </div>
@@ -751,18 +751,24 @@
       const labels = readings.map(r => new Date(r.timestamp));
       const indexData = readings.map(r => r.value);
 
+      // Only show S&P 500 overlay on ranges with enough data granularity
+      const showSP500 = ['1W', '1Y', 'MAX'].includes(currentRange);
+      document.getElementById('sp500Legend').style.display = showSP500 ? '' : 'none';
+
       // Map S&P 500 data onto the same time axis as oil data (align by date prefix)
-      // Build a lookup: date string (YYYY-MM-DD) -> sp500 value
-      const sp500ByDate = {};
-      for (const r of sp500Readings) {
-        const dateKey = r.timestamp.slice(0, 10);
-        sp500ByDate[dateKey] = r.value;
+      let sp500Data = [];
+      if (showSP500) {
+        const sp500ByDate = {};
+        for (const r of sp500Readings) {
+          const dateKey = r.timestamp.slice(0, 10);
+          sp500ByDate[dateKey] = r.value;
+        }
+        // For each oil reading timestamp, find matching S&P 500 value by date
+        sp500Data = readings.map(r => {
+          const dateKey = new Date(r.timestamp).toISOString().slice(0, 10);
+          return sp500ByDate[dateKey] !== undefined ? sp500ByDate[dateKey] : null;
+        });
       }
-      // For each oil reading timestamp, find matching S&P 500 value by date
-      const sp500Data = readings.map(r => {
-        const dateKey = new Date(r.timestamp).toISOString().slice(0, 10);
-        return sp500ByDate[dateKey] !== undefined ? sp500ByDate[dateKey] : null;
-      });
 
       if (chart) chart.destroy();
 
@@ -788,7 +794,7 @@
               yAxisID: 'y',
               order: 1
             },
-            {
+            ...(showSP500 ? [{
               label: 'S&P 500',
               data: sp500Data,
               borderColor: '#6eb5ff',
@@ -799,7 +805,7 @@
               fill: false,
               yAxisID: 'y2',
               order: 2
-            }
+            }] : [])
           ]
         },
         options: {
@@ -872,8 +878,8 @@
               beginAtZero: false,
               border: { display: false }
             },
-            // Right Y-axis: S&P 500
-            y2: {
+            // Right Y-axis: S&P 500 (only shown when S&P overlay is active)
+            ...(showSP500 ? { y2: {
               position: 'right',
               grid: {
                 drawOnChartArea: false
@@ -885,7 +891,7 @@
               },
               beginAtZero: false,
               border: { display: false }
-            }
+            }} : {})
           }
         }
       });
