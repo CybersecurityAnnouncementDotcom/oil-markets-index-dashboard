@@ -29,8 +29,46 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON readings(timestamp
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---------------------------------------------------------------------------
+// Auth helpers — nginx sets X-Auth-* headers from the auth_request subrequest
+// ---------------------------------------------------------------------------
+
+/**
+ * Middleware: require any authenticated user (Basic or Pro).
+ * When accessed via nginx, X-Auth-Plan-Tier is always set for authenticated users.
+ * When accessed directly (bypassing nginx), the header is absent → reject.
+ */
+function requireAuth(req, res, next) {
+  const tier = req.headers['x-auth-plan-tier'];
+  if (!tier) {
+    return res.status(401).json({ error: 'Authentication required. Access this dashboard through the website.' });
+  }
+  req.planTier = tier;
+  next();
+}
+
+/**
+ * Middleware: require Pro tier subscription.
+ */
+function requirePro(req, res, next) {
+  const tier = req.headers['x-auth-plan-tier'];
+  if (!tier) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  if (tier !== 'pro') {
+    return res.status(403).json({ error: 'Pro subscription required for API access. Upgrade at https://quantitativegenius.com' });
+  }
+  req.planTier = tier;
+  next();
+}
+
+// GET /api/user-tier — returns the user's plan tier (used by frontend to show/hide Pro features)
+app.get('/api/user-tier', requireAuth, (req, res) => {
+  res.json({ tier: req.planTier });
+});
+
 // GET /api/current — current index value + WTI + Brent
-app.get('/api/current', (req, res) => {
+app.get('/api/current', requireAuth, (req, res) => {
   try {
     const latest = db.prepare(
       'SELECT * FROM readings ORDER BY timestamp DESC LIMIT 1'
@@ -85,7 +123,7 @@ app.get('/api/current', (req, res) => {
 });
 
 // GET /api/history?range=1H|1D|1W|1Y|MAX
-app.get('/api/history', (req, res) => {
+app.get('/api/history', requireAuth, (req, res) => {
   try {
     const range = req.query.range || '1Y';
     let since;
@@ -147,7 +185,7 @@ app.get('/api/history', (req, res) => {
 
 // S&P 500 data from world markets DB for overlay
 const worldDbPath = path.join(__dirname, '..', 'world-markets-index-dashboard', 'data', 'world_markets.db');
-app.get('/api/sp500-history', (req, res) => {
+app.get('/api/sp500-history', requireAuth, (req, res) => {
   try {
     const worldDb = require('better-sqlite3')(worldDbPath, { readonly: true });
     const range = req.query.range || 'MAX';
@@ -184,8 +222,13 @@ app.get('/api/sp500-history', (req, res) => {
   }
 });
 
-// POST /api/readings — store new reading
+// POST /api/readings — store new reading (internal only — called by fetch script on localhost)
 app.post('/api/readings', (req, res) => {
+  // Only allow from localhost (server's own fetch script)
+  const ip = req.ip || req.connection.remoteAddress;
+  if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Internal endpoint' });
+  }
   try {
     const { value, wti_price, brent_price } = req.body;
     if (value == null) return res.status(400).json({ error: 'value required' });
@@ -207,6 +250,66 @@ app.post('/api/readings', (req, res) => {
     ).run(timestamp, value, wti_price || null, brent_price || null);
 
     res.json({ status: 'ok', timestamp, value });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Pro-only: CSV/JSON export endpoints
+// ---------------------------------------------------------------------------
+
+// GET /api/export/json?range=MAX — full data export as JSON
+app.get('/api/export/json', requirePro, (req, res) => {
+  try {
+    const range = req.query.range || 'MAX';
+    const now = new Date();
+    let since = '1900-01-01T00:00:00.000Z';
+
+    switch (range) {
+      case '1W': since = new Date(now - 7 * 86400000).toISOString(); break;
+      case '1M': since = new Date(now - 30 * 86400000).toISOString(); break;
+      case '1Y': since = new Date(now - 365 * 86400000).toISOString(); break;
+      case 'MAX': default: since = '1900-01-01T00:00:00.000Z';
+    }
+
+    const readings = db.prepare(
+      'SELECT timestamp, value as index_value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
+    ).all(since);
+
+    res.setHeader('Content-Disposition', `attachment; filename="oil-markets-index-${range}.json"`);
+    res.json({ export_date: new Date().toISOString(), range, record_count: readings.length, data: readings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/export/csv?range=MAX — full data export as CSV
+app.get('/api/export/csv', requirePro, (req, res) => {
+  try {
+    const range = req.query.range || 'MAX';
+    const now = new Date();
+    let since = '1900-01-01T00:00:00.000Z';
+
+    switch (range) {
+      case '1W': since = new Date(now - 7 * 86400000).toISOString(); break;
+      case '1M': since = new Date(now - 30 * 86400000).toISOString(); break;
+      case '1Y': since = new Date(now - 365 * 86400000).toISOString(); break;
+      case 'MAX': default: since = '1900-01-01T00:00:00.000Z';
+    }
+
+    const readings = db.prepare(
+      'SELECT timestamp, value as index_value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
+    ).all(since);
+
+    let csv = 'timestamp,index_value,wti_price,brent_price\n';
+    for (const r of readings) {
+      csv += `${r.timestamp},${r.index_value},${r.wti_price || ''},${r.brent_price || ''}\n`;
+    }
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="oil-markets-index-${range}.csv"`);
+    res.send(csv);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
