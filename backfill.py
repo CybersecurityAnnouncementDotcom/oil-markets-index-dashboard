@@ -26,17 +26,24 @@ def init_db():
     conn.commit()
     return conn
 
-def backfill():
+def backfill(force=False):
     conn = init_db()
     c = conn.cursor()
     
     # Check if we already have data
     c.execute("SELECT COUNT(*) FROM readings")
     count = c.fetchone()[0]
-    if count > 0:
+    if count > 0 and not force:
         print(f"Database already has {count} readings. Skipping backfill.")
+        print("Use --force to clear and re-backfill with corrected formulas.")
         conn.close()
         return
+    
+    if count > 0 and force:
+        print(f"Force mode: clearing {count} existing readings...")
+        c.execute("DELETE FROM readings")
+        conn.commit()
+        print("  Old data cleared.")
     
     print("Fetching WTI (CL=F) history...")
     wti = yf.Ticker("CL=F")
@@ -106,4 +113,5 @@ def backfill():
     conn.close()
 
 if __name__ == "__main__":
-    backfill()
+    force = "--force" in sys.argv
+    backfill(force=force)
