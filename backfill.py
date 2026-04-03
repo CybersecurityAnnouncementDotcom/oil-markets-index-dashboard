@@ -82,7 +82,7 @@ def backfill():
         elif wti_price is None:
             composite = brent_price
         else:
-            composite = (wti_price * 0.4) + (brent_price * 0.6)
+            composite = (wti_price * 0.3) + (brent_price * 0.7)
         
         index_value = round((composite / 147.0) * 5000, 2)
         timestamp = date.strftime('%Y-%m-%dT16:00:00.000Z')

@@ -1,6 +1,6 @@
 # QuantitativeGenius.com — Master Reference Guide
 
-**Last Updated:** April 2, 2026
+**Last Updated:** April 3, 2026
 **Owner:** jq_007@yahoo.com
 **Brand:** QuantitativeGenius.com
 
@@ -120,7 +120,7 @@
 - **Fetch interval:** Every 60 seconds
 - **Index scale:** Scaled to S&P 500 range
 - **Formula:** `(composite / 147.0) * 5000`
-- **Composite weighting:** `(Brent × 0.7) + (WTI × 0.3)` (70% Brent, 30% WTI)
+- **Composite weighting:** `(Brent × 0.7) + (WTI × 0.3)` (70% Brent, 30% WTI) — consistent across fetch_oil.py and backfill.py
 - **Color scheme:** Brown background, yellow/gold lettering
 - **Big number color:** Yellow (`#f5c542`)
 - **Chart overlays:** Oil Composite in gold (#d4af37), S&P 500 in blue (#4488ff) — no separate WTI/Brent lines
@@ -151,7 +151,7 @@
 
 | Country | Weight | Ticker |
 |---|---|---|
-| USA | 24.5% | ^GSPC |
+| USA | 24.6% | ^GSPC |
 | China | 14.3% | 000001.SS |
 | Japan | 8.2% | ^N225 |
 | Germany | 6.1% | ^GDAXI |
@@ -473,6 +473,9 @@ cd ~/cybersecurity-threat-index-dashboard && git pull
 - **SQLite WAL files:** If DB shows stale cached data, delete `.db-wal` and `.db-shm` files, then restart PM2
 - **Chart.js segment coloring (cyber):** Uses `segment: { borderColor: (ctx) => getThreatColor(values[ctx.p1DataIndex]) }` to color each line segment by threat level
 - **Auto-update.sh conflict avoidance:** Uses `git stash + pull + checkout --theirs + stash drop` approach to prevent .db merge conflicts
+- **Oil backfill.py weighting fix (April 3, 2026):** backfill.py previously used 60/40 (WTI/Brent) instead of 70/30 (Brent/WTI). Fixed to match fetch_oil.py: `composite = (wti_price * 0.3) + (brent_price * 0.7)`
+- **World backfill.py SCALE_FACTOR fix (April 3, 2026):** backfill.py was missing the `SCALE_FACTOR = 0.194715` multiplier that fetch_data.py uses. Added to keep backfill and live data consistent
+- **World weights fix (April 3, 2026):** USA weight changed from 0.245 to 0.246 so all 20 weights sum to exactly 1.000 (was 0.999). Updated in both fetch_data.py and backfill.py
 
 ### Branding
 - **Current brand:** QuantitativeGenius.com
@@ -543,6 +546,13 @@ These are the Perplexity Computer threads where the projects were built:
 - Added April 2026 entry to cyber dashboard (78% HIGH)
 - Removed "Last Updated" text from cyber dashboard
 - Fixed GitHub-to-server push workflow
+
+### Thread 7 — Code & Documentation Audit Fixes (April 3, 2026)
+- Oil: backfill.py weighting corrected from 60/40 to 70/30 (Brent/WTI) to match fetch_oil.py
+- World: backfill.py now includes `SCALE_FACTOR = 0.194715` to match fetch_data.py
+- World: USA weight adjusted 0.245 → 0.246 so all 20 weights sum to exactly 1.000
+- Docs: QG-Master-Calculations updated with corrected weights, tier narrative (Tier 3 = 15.5%), and full-precision oil example
+- All changes pushed to GitHub
 
 ### Thread 6 — Bug Fixes Round 2 (April 2, 2026)
 - World: Country names show "Country — Index Name" on flag hover in Other Markets
