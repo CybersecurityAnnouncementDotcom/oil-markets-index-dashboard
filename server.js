@@ -151,16 +151,32 @@ app.get('/api/sp500-history', (req, res) => {
   try {
     const worldDb = require('better-sqlite3')(worldDbPath, { readonly: true });
     const range = req.query.range || 'MAX';
-    let since;
     const now = new Date();
+    let rows;
     switch(range) {
-      case '1H': since = new Date(now - 3600000); break;
-      case '1D': since = new Date(now - 86400000); break;
-      case '1W': since = new Date(now - 7 * 86400000); break;
-      case '1Y': since = new Date(now - 365 * 86400000); break;
-      default: since = new Date('2000-01-01');
+      case '1H': {
+        const since = new Date(now - 3600000).toISOString();
+        rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since);
+        break;
+      }
+      case '1D': {
+        const since = new Date(now - 86400000).toISOString();
+        rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since);
+        break;
+      }
+      case '1W': {
+        const since = new Date(now - 7 * 86400000).toISOString();
+        rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since);
+        break;
+      }
+      default: {
+        // 1Y and MAX: use date-only comparison for daily backfill data
+        let since;
+        if (range === '1Y') since = new Date(now - 365 * 86400000).toISOString().split('T')[0];
+        else since = '2000-01-01';
+        rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since);
+      }
     }
-    const rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since.toISOString().split('T')[0]);
     worldDb.close();
     res.json({ readings: rows });
   } catch(err) {
