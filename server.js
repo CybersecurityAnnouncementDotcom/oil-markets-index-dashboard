@@ -136,6 +136,14 @@ app.get('/api/history', (req, res) => {
       ).all(since);
     }
 
+    // For 1H/1D: if fewer than 2 readings, fall back to the most recent 20 readings
+    // so the chart always has data to display
+    if ((range === '1H' || range === '1D') && readings.length < 2) {
+      readings = db.prepare(
+        'SELECT timestamp, value, wti_price, brent_price FROM readings ORDER BY timestamp DESC LIMIT 20'
+      ).all().reverse();
+    }
+
     // Also get previous close for change calculation on price cards
     const firstReading = readings.length > 0 ? readings[0] : null;
 
