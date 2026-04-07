@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Backfill historical oil price data into SQLite database.
 
+WTI data sources:
+  - CL=F (NYMEX WTI Crude Futures via Yahoo Finance): ~2000 to present
+  - FRED DCOILWTICO (WTI Spot Cushing FOB): 1986 to present (fills pre-2000 gap)
+
 Brent data sources:
   - BZ=F (ICE Brent Crude Futures via Yahoo Finance): 2007-07-30 to present
   - FRED DCOILBRENTEU (Europe Brent Spot FOB): 1987 to present (fills pre-2007 gap)
@@ -17,6 +21,7 @@ from datetime import datetime
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "oil_markets.db")
 
 FRED_BRENT_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU&cosd=1987-01-01&coed=2030-12-31"
+FRED_WTI_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILWTICO&cosd=1986-01-01&coed=2030-12-31"
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -67,6 +72,32 @@ def backfill(force=False):
     # Normalize indexes to date only (remove timezone)
     wti_hist.index = wti_hist.index.tz_localize(None) if wti_hist.index.tz is not None else wti_hist.index
     brent_hist.index = brent_hist.index.tz_localize(None) if brent_hist.index.tz is not None else brent_hist.index
+    
+    # Fetch FRED WTI spot prices to fill the pre-2000 gap
+    print("Fetching WTI spot prices from FRED (DCOILWTICO)...")
+    try:
+        resp = urllib.request.urlopen(FRED_WTI_URL)
+        fred_csv = resp.read().decode('utf-8')
+        fred_wti_df = pd.read_csv(io.StringIO(fred_csv), parse_dates=['observation_date'], index_col='observation_date')
+        fred_wti_df['DCOILWTICO'] = pd.to_numeric(fred_wti_df['DCOILWTICO'], errors='coerce')
+        fred_wti_df = fred_wti_df.dropna()
+        fred_wti_df.index = fred_wti_df.index.tz_localize(None) if fred_wti_df.index.tz is not None else fred_wti_df.index
+        print(f"  Got {len(fred_wti_df)} FRED WTI records from {fred_wti_df.index[0].strftime('%Y-%m-%d')} to {fred_wti_df.index[-1].strftime('%Y-%m-%d')}")
+        
+        # Merge: use CL=F where available (futures price), FRED for gaps
+        clf_start = wti_hist.index[0] if len(wti_hist) > 0 else pd.Timestamp('2099-01-01')
+        fred_wti_pre = fred_wti_df[fred_wti_df.index < clf_start]
+        print(f"  Using {len(fred_wti_pre)} FRED records for pre-{clf_start.strftime('%Y-%m-%d')} WTI data")
+        
+        if len(fred_wti_pre) > 0:
+            fred_wti_series = fred_wti_pre['DCOILWTICO'].rename('Close')
+            fred_wti_as_df = pd.DataFrame({'Close': fred_wti_series})
+            wti_hist = pd.concat([fred_wti_as_df, wti_hist])
+            wti_hist = wti_hist[~wti_hist.index.duplicated(keep='last')]  # prefer CL=F if overlap
+            wti_hist = wti_hist.sort_index()
+            print(f"  Combined WTI: {len(wti_hist)} records from {wti_hist.index[0].strftime('%Y-%m-%d')}")
+    except Exception as e:
+        print(f"  WARNING: FRED WTI fetch failed ({e}), pre-2000 WTI will be NULL")
     
     # Fetch FRED Brent spot prices to fill the pre-2007 gap
     print("Fetching Brent spot prices from FRED (DCOILBRENTEU)...")
