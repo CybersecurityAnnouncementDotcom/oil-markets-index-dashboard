@@ -33,32 +33,72 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Auth helpers — nginx sets X-Auth-* headers from the auth_request subrequest
 // ---------------------------------------------------------------------------
 
+// API key validation helper — calls auth server at localhost:5010
+function validateApiKeyRemote(apiKey) {
+  return new Promise((resolve) => {
+    const url = `http://localhost:5010/auth/validate-key?key=${encodeURIComponent(apiKey)}`;
+    require('http').get(url, (resp) => {
+      let data = '';
+      resp.on('data', chunk => data += chunk);
+      resp.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch(e) { resolve({ valid: false }); }
+      });
+    }).on('error', () => resolve({ valid: false }));
+  });
+}
+
+// API key cache: key -> { tier, email, expires }
+const apiKeyCache = new Map();
+
 /**
  * Middleware: require any authenticated user (Basic or Pro).
- * When accessed via nginx, X-Auth-Plan-Tier is always set for authenticated users.
- * When accessed directly (bypassing nginx), the header is absent → reject.
+ * Method 1: nginx sets X-Auth-Plan-Tier (cookie-based flow — unchanged).
+ * Method 2: X-API-Key header (direct programmatic access, validated via auth server).
  */
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
+  // Method 1: nginx auth (existing cookie-based flow)
   const tier = req.headers['x-auth-plan-tier'];
-  if (!tier) {
-    return res.status(401).json({ error: 'Authentication required. Access this dashboard through the website.' });
+  if (tier) {
+    req.planTier = tier;
+    return next();
   }
-  req.planTier = tier;
-  next();
+
+  // Method 2: API key (direct programmatic access)
+  const apiKey = req.headers['x-api-key'];
+  if (apiKey) {
+    // Check cache first
+    const cached = apiKeyCache.get(apiKey);
+    if (cached && cached.expires > Date.now()) {
+      req.planTier = cached.tier;
+      return next();
+    }
+
+    try {
+      const data = await validateApiKeyRemote(apiKey);
+      if (data.valid) {
+        // Cache for 60 seconds
+        apiKeyCache.set(apiKey, { tier: data.tier, email: data.email, expires: Date.now() + 60000 });
+        req.planTier = data.tier;
+        return next();
+      }
+    } catch(e) { /* auth server unreachable */ }
+
+    return res.status(401).json({ error: 'Invalid API key' });
+  }
+
+  return res.status(401).json({ error: 'Authentication required. Access this dashboard through the website.' });
 }
 
 /**
  * Middleware: require Pro tier subscription.
  */
 function requirePro(req, res, next) {
-  const tier = req.headers['x-auth-plan-tier'];
-  if (!tier) {
+  if (!req.planTier) {
     return res.status(401).json({ error: 'Authentication required.' });
   }
-  if (tier !== 'pro') {
+  if (req.planTier !== 'pro') {
     return res.status(403).json({ error: 'Pro subscription required for API access. Upgrade at https://quantitativegenius.com' });
   }
-  req.planTier = tier;
   next();
 }
 

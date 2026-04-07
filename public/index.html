@@ -972,8 +972,91 @@
           menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
         });
         document.addEventListener('click', () => { menu.style.display = 'none'; });
+
+        // ── API Key section ──
+        const apiKeySection = document.createElement('div');
+        apiKeySection.className = 'api-key-section';
+        apiKeySection.innerHTML = `
+          <div class="api-key-header">
+            <span class="api-key-title">API Access</span>
+            <span class="api-key-status" id="apiKeyStatus">Loading...</span>
+          </div>
+          <div class="api-key-content" id="apiKeyContent"></div>
+        `;
+
+        // Insert after the chart section (find the chart's parent card/section)
+        const chartSection = document.querySelector('.chart-section') || document.querySelector('.chart-card') || document.querySelector('.card:nth-child(2)');
+        if (chartSection) {
+          chartSection.parentNode.insertBefore(apiKeySection, chartSection.nextSibling);
+        }
+
+        // Check API key status
+        try {
+          const keyRes = await fetch('https://quantitativegenius.com/auth/api-key-status', { credentials: 'include' });
+          if (keyRes.ok) {
+            const keyData = await keyRes.json();
+            const statusEl = document.getElementById('apiKeyStatus');
+            const contentEl = document.getElementById('apiKeyContent');
+
+            if (keyData.hasKey) {
+              statusEl.textContent = 'Active';
+              statusEl.style.color = '#22c55e';
+              contentEl.innerHTML = `
+                <div class="api-key-display">
+                  <code>${keyData.prefix}...</code>
+                  <button class="api-key-btn api-key-btn--revoke" onclick="revokeApiKey()">Revoke</button>
+                </div>
+                <div class="api-key-hint">Use header: X-API-Key: your-full-key</div>
+              `;
+            } else {
+              statusEl.textContent = 'No key';
+              statusEl.style.color = '#6b7280';
+              contentEl.innerHTML = `
+                <button class="api-key-btn api-key-btn--generate" onclick="generateApiKey()">Generate API Key</button>
+                <div class="api-key-hint">Pro feature — programmatic access to all endpoints</div>
+              `;
+            }
+          }
+        } catch(e) { /* ignore */ }
       } catch (e) { /* Pro features silently fail for non-pro users */ }
     })();
+  </script>
+  <script>
+    async function generateApiKey() {
+      try {
+        const res = await fetch('https://quantitativegenius.com/auth/api-key', { method: 'POST', credentials: 'include' });
+        if (!res.ok) { alert('Failed to generate key'); return; }
+        const data = await res.json();
+        const contentEl = document.getElementById('apiKeyContent');
+        const statusEl = document.getElementById('apiKeyStatus');
+        statusEl.textContent = 'Active';
+        statusEl.style.color = '#22c55e';
+        contentEl.innerHTML = `
+          <div class="api-key-new">
+            <div class="api-key-warning">Copy this key now — it will not be shown again!</div>
+            <code class="api-key-full">${data.key}</code>
+            <button class="api-key-btn api-key-btn--copy" onclick="navigator.clipboard.writeText('${data.key}');this.textContent='Copied!'">Copy</button>
+          </div>
+          <div class="api-key-hint">Use header: X-API-Key: ${data.key}</div>
+        `;
+      } catch(e) { alert('Error generating key'); }
+    }
+
+    async function revokeApiKey() {
+      if (!confirm('Revoke your API key? Any scripts using it will stop working.')) return;
+      try {
+        const res = await fetch('https://quantitativegenius.com/auth/api-key', { method: 'DELETE', credentials: 'include' });
+        if (!res.ok) { alert('Failed to revoke key'); return; }
+        const statusEl = document.getElementById('apiKeyStatus');
+        const contentEl = document.getElementById('apiKeyContent');
+        statusEl.textContent = 'No key';
+        statusEl.style.color = '#6b7280';
+        contentEl.innerHTML = `
+          <button class="api-key-btn api-key-btn--generate" onclick="generateApiKey()">Generate API Key</button>
+          <div class="api-key-hint">Pro feature — programmatic access to all endpoints</div>
+        `;
+      } catch(e) { alert('Error revoking key'); }
+    }
   </script>
   <style>
     .export-wrap { position: relative; margin-left: auto; }
@@ -996,6 +1079,85 @@
       text-decoration: none; transition: background .1s;
     }
     .export-menu a:hover { background: var(--surface-3, #252540); color: var(--text, #e0e0f0); }
+    .api-key-section {
+      background: var(--surface, #111827);
+      border: 1px solid var(--border, #1f2937);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-top: 12px;
+    }
+    .api-key-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .api-key-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary, #9ca3af);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .api-key-status {
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .api-key-content { font-size: 13px; }
+    .api-key-display { display: flex; align-items: center; gap: 10px; }
+    .api-key-display code {
+      background: rgba(255,255,255,0.05);
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: var(--text, #e8eaed);
+      flex: 1;
+    }
+    .api-key-btn {
+      border: none;
+      border-radius: 4px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .api-key-btn--generate {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .api-key-btn--generate:hover { background: #2563eb; }
+    .api-key-btn--revoke {
+      background: rgba(239,68,68,0.15);
+      color: #ef4444;
+    }
+    .api-key-btn--revoke:hover { background: rgba(239,68,68,0.25); }
+    .api-key-btn--copy {
+      background: #22c55e;
+      color: #000;
+    }
+    .api-key-hint {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #6b7280;
+    }
+    .api-key-new { margin-bottom: 8px; }
+    .api-key-warning {
+      color: #f59e0b;
+      font-weight: 600;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .api-key-full {
+      display: block;
+      background: rgba(255,255,255,0.05);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #22c55e;
+      word-break: break-all;
+      margin-bottom: 6px;
+    }
   </style>
 </body>
 </html>
