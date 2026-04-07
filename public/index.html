@@ -992,7 +992,7 @@
 
         // Check API key status
         try {
-          const keyRes = await fetch('https://quantitativegenius.com/auth/api-key-status', { credentials: 'include' });
+          const keyRes = await fetch('/api/auth/api-key-status', { credentials: 'include' });
           if (keyRes.ok) {
             const keyData = await keyRes.json();
             const statusEl = document.getElementById('apiKeyStatus');
@@ -1024,7 +1024,7 @@
   <script>
     async function generateApiKey() {
       try {
-        const res = await fetch('https://quantitativegenius.com/auth/api-key', { method: 'POST', credentials: 'include' });
+        const res = await fetch('/api/auth/api-key', { method: 'POST', credentials: 'include' });
         if (!res.ok) { alert('Failed to generate key'); return; }
         const data = await res.json();
         const contentEl = document.getElementById('apiKeyContent');
@@ -1045,7 +1045,7 @@
     async function revokeApiKey() {
       if (!confirm('Revoke your API key? Any scripts using it will stop working.')) return;
       try {
-        const res = await fetch('https://quantitativegenius.com/auth/api-key', { method: 'DELETE', credentials: 'include' });
+        const res = await fetch('/api/auth/api-key', { method: 'DELETE', credentials: 'include' });
         if (!res.ok) { alert('Failed to revoke key'); return; }
         const statusEl = document.getElementById('apiKeyStatus');
         const contentEl = document.getElementById('apiKeyContent');
