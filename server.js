@@ -304,7 +304,7 @@ app.post('/api/readings', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // GET /api/export/json?range=MAX — full data export as JSON
-app.get('/api/export/json', requirePro, (req, res) => {
+app.get('/api/export/json', requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
     const now = new Date();
@@ -329,7 +329,7 @@ app.get('/api/export/json', requirePro, (req, res) => {
 });
 
 // GET /api/export/csv?range=MAX — full data export as CSV
-app.get('/api/export/csv', requirePro, (req, res) => {
+app.get('/api/export/csv', requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
     const now = new Date();
