@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""Backfill historical oil price data into SQLite database."""
+"""Backfill historical oil price data into SQLite database.
+
+Brent data sources:
+  - BZ=F (ICE Brent Crude Futures via Yahoo Finance): 2007-07-30 to present
+  - FRED DCOILBRENTEU (Europe Brent Spot FOB): 1987 to present (fills pre-2007 gap)
+"""
 import sqlite3
 import os
 import sys
+import io
+import urllib.request
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "oil_markets.db")
+
+FRED_BRENT_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU&cosd=1987-01-01&coed=2030-12-31"
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -50,14 +59,42 @@ def backfill(force=False):
     wti_hist = wti.history(period="max", interval="1d")
     print(f"  Got {len(wti_hist)} WTI records from {wti_hist.index[0].strftime('%Y-%m-%d') if len(wti_hist) > 0 else 'N/A'}")
     
-    print("Fetching Brent (BZ=F) history...")
+    print("Fetching Brent (BZ=F) history from Yahoo Finance...")
     brent = yf.Ticker("BZ=F")
     brent_hist = brent.history(period="max", interval="1d")
-    print(f"  Got {len(brent_hist)} Brent records from {brent_hist.index[0].strftime('%Y-%m-%d') if len(brent_hist) > 0 else 'N/A'}")
+    print(f"  Got {len(brent_hist)} BZ=F records from {brent_hist.index[0].strftime('%Y-%m-%d') if len(brent_hist) > 0 else 'N/A'}")
     
     # Normalize indexes to date only (remove timezone)
     wti_hist.index = wti_hist.index.tz_localize(None) if wti_hist.index.tz is not None else wti_hist.index
     brent_hist.index = brent_hist.index.tz_localize(None) if brent_hist.index.tz is not None else brent_hist.index
+    
+    # Fetch FRED Brent spot prices to fill the pre-2007 gap
+    print("Fetching Brent spot prices from FRED (DCOILBRENTEU)...")
+    try:
+        resp = urllib.request.urlopen(FRED_BRENT_URL)
+        fred_csv = resp.read().decode('utf-8')
+        fred_df = pd.read_csv(io.StringIO(fred_csv), parse_dates=['observation_date'], index_col='observation_date')
+        # FRED uses "." for missing values
+        fred_df['DCOILBRENTEU'] = pd.to_numeric(fred_df['DCOILBRENTEU'], errors='coerce')
+        fred_df = fred_df.dropna()
+        fred_df.index = fred_df.index.tz_localize(None) if fred_df.index.tz is not None else fred_df.index
+        print(f"  Got {len(fred_df)} FRED records from {fred_df.index[0].strftime('%Y-%m-%d')} to {fred_df.index[-1].strftime('%Y-%m-%d')}")
+        
+        # Merge: use BZ=F where available (more accurate futures price), FRED for gaps
+        bz_start = brent_hist.index[0] if len(brent_hist) > 0 else pd.Timestamp('2099-01-01')
+        fred_pre = fred_df[fred_df.index < bz_start]
+        print(f"  Using {len(fred_pre)} FRED records for pre-{bz_start.strftime('%Y-%m-%d')} Brent data")
+        
+        # Add FRED data to brent_hist as a combined series
+        if len(fred_pre) > 0:
+            fred_series = fred_pre['DCOILBRENTEU'].rename('Close')
+            fred_as_df = pd.DataFrame({'Close': fred_series})
+            brent_hist = pd.concat([fred_as_df, brent_hist])
+            brent_hist = brent_hist[~brent_hist.index.duplicated(keep='last')]  # prefer BZ=F if overlap
+            brent_hist = brent_hist.sort_index()
+            print(f"  Combined Brent: {len(brent_hist)} records from {brent_hist.index[0].strftime('%Y-%m-%d')}")
+    except Exception as e:
+        print(f"  WARNING: FRED fetch failed ({e}), pre-2007 Brent will be NULL")
     
     # Create a combined date range
     all_dates = sorted(set(wti_hist.index.tolist() + brent_hist.index.tolist()))
