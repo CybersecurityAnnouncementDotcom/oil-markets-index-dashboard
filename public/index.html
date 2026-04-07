@@ -751,22 +751,32 @@
       const labels = readings.map(r => new Date(r.timestamp));
       const indexData = readings.map(r => r.value);
 
-      // Only show S&P 500 overlay on ranges with enough data granularity
-      const showSP500 = ['1W', '1Y', 'MAX'].includes(currentRange);
+      // Show S&P 500 overlay on ALL time ranges (1H, 1D, 1W, 1Y, MAX)
+      const showSP500 = sp500Readings && sp500Readings.length > 0;
       document.getElementById('sp500Legend').style.display = showSP500 ? '' : 'none';
 
-      // Map S&P 500 data onto the same time axis as oil data (align by date prefix)
+      // Map S&P 500 data onto the same time axis as oil data
+      // For 1H/1D: match by minute (HH:MM) for intra-day alignment
+      // For 1W/1Y/MAX: match by date (YYYY-MM-DD) for daily alignment
       let sp500Data = [];
       if (showSP500) {
-        const sp500ByDate = {};
+        const useMinuteMatch = ['1H', '1D'].includes(currentRange);
+        const sp500Map = {};
         for (const r of sp500Readings) {
-          const dateKey = r.timestamp.slice(0, 10);
-          sp500ByDate[dateKey] = r.value;
+          if (useMinuteMatch) {
+            // Match by minute: use YYYY-MM-DDTHH:MM prefix
+            const minuteKey = r.timestamp.slice(0, 16);
+            sp500Map[minuteKey] = r.value;
+          } else {
+            // Match by date: use YYYY-MM-DD prefix
+            const dateKey = r.timestamp.slice(0, 10);
+            sp500Map[dateKey] = r.value;
+          }
         }
-        // For each oil reading timestamp, find matching S&P 500 value by date
         sp500Data = readings.map(r => {
-          const dateKey = new Date(r.timestamp).toISOString().slice(0, 10);
-          return sp500ByDate[dateKey] !== undefined ? sp500ByDate[dateKey] : null;
+          const ts = new Date(r.timestamp).toISOString();
+          const key = useMinuteMatch ? ts.slice(0, 16) : ts.slice(0, 10);
+          return sp500Map[key] !== undefined ? sp500Map[key] : null;
         });
       }
 
