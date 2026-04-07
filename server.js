@@ -255,7 +255,7 @@ app.get('/api/sp500-history', requireAuth, (req, res) => {
         // 1Y and MAX: use date-only comparison for daily backfill data
         let since;
         if (range === '1Y') since = new Date(now - 365 * 86400000).toISOString().split('T')[0];
-        else since = '2000-01-01';
+        else since = '1986-01-01';
         rows = worldDb.prepare('SELECT timestamp, price as value FROM country_data WHERE ticker = ? AND timestamp >= ? ORDER BY timestamp ASC').all('^GSPC', since);
       }
     }
