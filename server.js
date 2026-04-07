@@ -36,7 +36,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // API key validation helper — calls auth server at localhost:5010
 // Passes this dashboard's Stripe product ID so the auth server verifies
 // the user actually has a subscription covering this specific dashboard.
-const DASHBOARD_PRODUCT_ID = 'prod_UGE7O0dI68hTVj'; // Oil Markets Index
+const DASHBOARD_PRODUCT_ID = 'prod_UGE7bG3qM4Bz2I'; // Oil Markets Index
 
 function validateApiKeyRemote(apiKey) {
   return new Promise((resolve) => {
