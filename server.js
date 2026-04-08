@@ -29,6 +29,13 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON readings(timestamp
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// ---------------------------------------------------------------------------
+// Rate limiting — defense in depth (also rate-limited at nginx level)
+// ---------------------------------------------------------------------------
+const apiLimiter = rateLimiter({ windowMs: 60000, max: 60, message: 'Too many API requests. Please wait a moment.' });
+const exportLimiter = rateLimiter({ windowMs: 60000, max: 5, message: 'Export rate limit exceeded. Please wait before exporting again.' });
+const authLimiter = rateLimiter({ windowMs: 60000, max: 10, message: 'Too many auth attempts. Please wait.' });
+
 
 // ---------------------------------------------------------------------------
 // Auth helpers — nginx sets X-Auth-* headers from the auth_request subrequest
