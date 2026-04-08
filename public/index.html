@@ -256,6 +256,23 @@
       padding: 3px;
     }
 
+    .pct-toggle {
+      background: transparent;
+      border: 1px solid rgba(100,100,140,0.3);
+      color: #5a586a;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .pct-toggle:hover { color: #8a8898; border-color: rgba(100,100,140,0.5); }
+    .pct-toggle.active {
+      background: rgba(240,160,48,0.15);
+      color: #f0a030;
+      border-color: rgba(240,160,48,0.4);
+    }
     .range-btn {
       padding: 5px 14px;
       font-size: 12px;
@@ -502,6 +519,7 @@
           <button class="range-btn" data-range="1Y">1Y</button>
           <button class="range-btn" data-range="MAX">MAX</button> <!-- default active -->
         </div>
+        <button id="pctToggle" class="pct-toggle" title="Toggle % change view">%</button>
       </div>
       <div class="chart-container">
         <canvas id="priceChart"></canvas>
@@ -780,6 +798,16 @@
         });
       }
 
+      // % change mode
+      const pctMode = document.getElementById('pctToggle').classList.contains('active');
+      function toPctChange(arr) {
+        const first = arr.find(v => v != null);
+        if (first == null || first === 0) return arr.map(() => null);
+        return arr.map(v => v != null ? ((v - first) / first) * 100 : null);
+      }
+      const chartIndex = pctMode ? toPctChange(indexData) : indexData;
+      const chartSP = pctMode ? toPctChange(sp500Data) : sp500Data;
+
       if (chart) chart.destroy();
 
       const timeUnit = currentRange === '1D' || currentRange === '1H' ? 'hour' :
@@ -793,9 +821,9 @@
           datasets: [
             {
               label: 'Oil Markets Index',
-              data: indexData,
+              data: chartIndex,
               borderColor: '#f0a030',
-              backgroundColor: 'rgba(240, 160, 48, 0.05)',
+              backgroundColor: pctMode ? 'rgba(240, 160, 48, 0.03)' : 'rgba(240, 160, 48, 0.05)',
               borderWidth: 2,
               pointRadius: 0,
               pointHoverRadius: 4,
@@ -806,14 +834,14 @@
             },
             ...(showSP500 ? [{
               label: 'S&P 500',
-              data: sp500Data,
+              data: chartSP,
               borderColor: '#6eb5ff',
               borderWidth: 1.5,
               pointRadius: 0,
               pointHoverRadius: 3,
               tension: 0.2,
               fill: false,
-              yAxisID: 'y2',
+              yAxisID: pctMode ? 'y' : 'y2',
               order: 2
             }] : [])
           ]
@@ -844,11 +872,13 @@
                 if (!reading) { el.style.opacity = '0'; return; }
                 const d = new Date(tt.dataPoints[0].parsed.x);
                 const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                const oilPct = pctMode ? chartIndex[idx] : null;
+                const sp500Pct = pctMode ? chartSP[idx] : null;
                 let html = `<div style="color:#8a7e68;font-size:11px;margin-bottom:4px;font-family:DM Sans,sans-serif">${dateStr}</div>`;
-                html += `<div style="color:#d4af37;font-weight:600">Oil Index: ${formatIndex(reading.value)}</div>`;
+                html += `<div style="color:#d4af37;font-weight:600">Oil Index: ${formatIndex(reading.value)}${oilPct != null ? ' (' + (oilPct >= 0 ? '+' : '') + oilPct.toFixed(2) + '%)' : ''}</div>`;
                 const sp500Val = sp500Data[idx];
                 if (sp500Val != null) {
-                  html += `<div style="color:#6eb5ff;margin-top:2px">S&P 500: ${formatIndex(sp500Val)}</div>`;
+                  html += `<div style="color:#6eb5ff;margin-top:2px">S&P 500: ${formatIndex(sp500Val)}${sp500Pct != null ? ' (' + (sp500Pct >= 0 ? '+' : '') + sp500Pct.toFixed(2) + '%)' : ''}</div>`;
                 }
                 el.innerHTML = html;
                 el.style.opacity = '1';
@@ -873,7 +903,7 @@
               },
               border: { display: false }
             },
-            // Left Y-axis: Oil Markets Index
+            // Left Y-axis: Oil Markets Index (or shared % axis in pct mode)
             y: {
               position: 'left',
               grid: {
@@ -881,15 +911,15 @@
                 drawBorder: false
               },
               ticks: {
-                color: '#f0a030',
+                color: pctMode ? '#5a586a' : '#f0a030',
                 font: { family: "'DM Mono'", size: 11 },
-                callback: v => v.toLocaleString('en-US', { maximumFractionDigits: 0 })
+                callback: pctMode ? (v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%') : (v => v.toLocaleString('en-US', { maximumFractionDigits: 0 }))
               },
               beginAtZero: false,
               border: { display: false }
             },
-            // Right Y-axis: S&P 500 (only shown when S&P overlay is active)
-            ...(showSP500 ? { y2: {
+            // Right Y-axis: S&P 500 (hidden in % mode since both share left axis)
+            ...(!pctMode && showSP500 ? { y2: {
               position: 'right',
               grid: {
                 drawOnChartArea: false
@@ -915,6 +945,12 @@
       ]);
       buildChart(readings, sp500Readings);
     }
+
+    // ── % Toggle Handler ──
+    document.getElementById('pctToggle').addEventListener('click', function() {
+      this.classList.toggle('active');
+      updateChart(currentRange);
+    });
 
     // ── Range toggle buttons ──
     document.querySelectorAll('.range-btn').forEach(btn => {
