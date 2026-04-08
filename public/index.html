@@ -841,7 +841,7 @@
               pointHoverRadius: 3,
               tension: 0.2,
               fill: false,
-              yAxisID: pctMode ? 'y' : 'y2',
+              yAxisID: 'y',
               order: 2
             }] : [])
           ]
@@ -911,27 +911,14 @@
                 drawBorder: false
               },
               ticks: {
-                color: pctMode ? '#5a586a' : '#f0a030',
+                color: '#5a586a',
                 font: { family: "'DM Mono'", size: 11 },
                 callback: pctMode ? (v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%') : (v => v.toLocaleString('en-US', { maximumFractionDigits: 0 }))
               },
               beginAtZero: false,
               border: { display: false }
             },
-            // Right Y-axis: S&P 500 (hidden in % mode since both share left axis)
-            ...(!pctMode && showSP500 ? { y2: {
-              position: 'right',
-              grid: {
-                drawOnChartArea: false
-              },
-              ticks: {
-                color: '#6eb5ff',
-                font: { family: "'DM Mono'", size: 11 },
-                callback: v => v.toLocaleString('en-US', { maximumFractionDigits: 0 })
-              },
-              beginAtZero: false,
-              border: { display: false }
-            }} : {})
+            // S&P 500 now shares the left Y-axis with Oil Index (no separate right axis)
           }
         }
       });
