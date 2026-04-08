@@ -3,6 +3,7 @@ const Database = require('better-sqlite3');
 const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { rateLimiter } = require('./rate-limiter');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -107,12 +108,12 @@ function requirePro(req, res, next) {
 }
 
 // GET /api/user-tier — returns the user's plan tier (used by frontend to show/hide Pro features)
-app.get('/api/user-tier', requireAuth, (req, res) => {
+app.get('/api/user-tier', apiLimiter, requireAuth, (req, res) => {
   res.json({ tier: req.planTier });
 });
 
 // GET /api/current — current index value + WTI + Brent
-app.get('/api/current', requireAuth, (req, res) => {
+app.get('/api/current', apiLimiter, requireAuth, (req, res) => {
   try {
     const latest = db.prepare(
       'SELECT * FROM readings ORDER BY timestamp DESC LIMIT 1'
@@ -167,7 +168,7 @@ app.get('/api/current', requireAuth, (req, res) => {
 });
 
 // GET /api/history?range=1H|1D|1W|1Y|MAX
-app.get('/api/history', requireAuth, (req, res) => {
+app.get('/api/history', apiLimiter, requireAuth, (req, res) => {
   try {
     const range = req.query.range || '1Y';
     let since;
@@ -229,7 +230,7 @@ app.get('/api/history', requireAuth, (req, res) => {
 
 // S&P 500 data from world markets DB for overlay
 const worldDbPath = path.join(__dirname, '..', 'world-markets-index-dashboard', 'data', 'world_markets.db');
-app.get('/api/sp500-history', requireAuth, (req, res) => {
+app.get('/api/sp500-history', apiLimiter, requireAuth, (req, res) => {
   try {
     const worldDb = require('better-sqlite3')(worldDbPath, { readonly: true });
     const range = req.query.range || 'MAX';
@@ -304,7 +305,7 @@ app.post('/api/readings', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // GET /api/export/json?range=MAX — full data export as JSON
-app.get('/api/export/json', requireAuth, requirePro, (req, res) => {
+app.get('/api/export/json', exportLimiter, requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
     const now = new Date();
@@ -329,7 +330,7 @@ app.get('/api/export/json', requireAuth, requirePro, (req, res) => {
 });
 
 // GET /api/export/csv?range=MAX — full data export as CSV
-app.get('/api/export/csv', requireAuth, requirePro, (req, res) => {
+app.get('/api/export/csv', exportLimiter, requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
     const now = new Date();
@@ -436,9 +437,9 @@ function proxyToAuth(method) {
   };
 }
 
-app.get('/api/auth/api-key-status', proxyToAuth('GET'));
-app.post('/api/auth/api-key', proxyToAuth('POST'));
-app.delete('/api/auth/api-key', proxyToAuth('DELETE'));
+app.get('/api/auth/api-key-status', authLimiter, proxyToAuth('GET'));
+app.post('/api/auth/api-key', authLimiter, proxyToAuth('POST'));
+app.delete('/api/auth/api-key', authLimiter, proxyToAuth('DELETE'));
 
 app.listen(PORT, () => {
   console.log(`Oil Markets Index Dashboard running on http://localhost:${PORT}`);
