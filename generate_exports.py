@@ -40,15 +40,19 @@ def get_db():
 
 def get_daily_close_readings(conn):
     """Get one reading per calendar day (the last reading of each day).
-    Uses the last reading's values as the daily 'close'."""
+    Uses the last reading's values as the daily 'close'.
+    Includes bitcoin_price via LEFT JOIN on bitcoin_data."""
     rows = conn.execute("""
-        SELECT date(timestamp) as date,
-               MAX(timestamp) as timestamp,
-               value as index_value,
-               wti_price,
-               brent_price
-        FROM readings
-        GROUP BY date(timestamp)
+        SELECT date(r.timestamp) as date,
+               MAX(r.timestamp) as timestamp,
+               r.value as index_value,
+               r.wti_price,
+               r.brent_price,
+               (SELECT bd.price FROM bitcoin_data bd
+                WHERE date(bd.timestamp) = date(r.timestamp)
+                ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
+        FROM readings r
+        GROUP BY date(r.timestamp)
         ORDER BY date ASC
     """).fetchall()
     return [dict(r) for r in rows]
@@ -68,7 +72,7 @@ def write_json(filepath, data):
     print(f"  Written: {filepath}")
 
 
-CSV_FIELDS = ["date", "index_value", "wti_price", "brent_price"]
+CSV_FIELDS = ["date", "index_value", "wti_price", "brent_price", "bitcoin_price"]
 
 
 def generate_daily_snapshot(conn, date_str=None):
@@ -76,14 +80,17 @@ def generate_daily_snapshot(conn, date_str=None):
     if date_str is None:
         date_str = datetime.utcnow().strftime("%Y-%m-%d")
 
-    # Get the last reading for this date
+    # Get the last reading for this date (with bitcoin price)
     reading = conn.execute("""
-        SELECT MAX(timestamp) as timestamp,
-               value as index_value,
-               wti_price,
-               brent_price
-        FROM readings WHERE date(timestamp) = ?
-    """, (date_str,)).fetchone()
+        SELECT MAX(r.timestamp) as timestamp,
+               r.value as index_value,
+               r.wti_price,
+               r.brent_price,
+               (SELECT bd.price FROM bitcoin_data bd
+                WHERE date(bd.timestamp) = ?
+                ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
+        FROM readings r WHERE date(r.timestamp) = ?
+    """, (date_str, date_str)).fetchone()
 
     if not reading or reading["index_value"] is None:
         print(f"  No data for {date_str}, skipping daily snapshot")
@@ -94,6 +101,7 @@ def generate_daily_snapshot(conn, date_str=None):
         "index_value": round(reading["index_value"], 2),
         "wti_price": round(reading["wti_price"], 2) if reading["wti_price"] else "",
         "brent_price": round(reading["brent_price"], 2) if reading["brent_price"] else "",
+        "bitcoin_price": round(reading["bitcoin_price"], 2) if reading["bitcoin_price"] else "",
     }
 
     # Daily CSV — one row
@@ -107,6 +115,7 @@ def generate_daily_snapshot(conn, date_str=None):
         "index_value": round(reading["index_value"], 2),
         "wti_price": round(reading["wti_price"], 2) if reading["wti_price"] else None,
         "brent_price": round(reading["brent_price"], 2) if reading["brent_price"] else None,
+        "bitcoin_price": round(reading["bitcoin_price"], 2) if reading["bitcoin_price"] else None,
     }
     json_path = DAILY_DIR / f"{date_str}.json"
     write_json(json_path, json_data)
@@ -127,6 +136,7 @@ def generate_latest(conn):
         "index_value": round(latest["index_value"], 2),
         "wti_price": round(latest["wti_price"], 2) if latest["wti_price"] else "",
         "brent_price": round(latest["brent_price"], 2) if latest["brent_price"] else "",
+        "bitcoin_price": round(latest["bitcoin_price"], 2) if latest.get("bitcoin_price") else "",
     }
 
     write_csv(
@@ -142,6 +152,7 @@ def generate_latest(conn):
         "index_value": round(latest["index_value"], 2),
         "wti_price": round(latest["wti_price"], 2) if latest["wti_price"] else None,
         "brent_price": round(latest["brent_price"], 2) if latest["brent_price"] else None,
+        "bitcoin_price": round(latest["bitcoin_price"], 2) if latest.get("bitcoin_price") else None,
     })
 
 
@@ -157,6 +168,7 @@ def generate_history(conn):
             "index_value": round(r["index_value"], 2),
             "wti_price": round(r["wti_price"], 2) if r["wti_price"] else "",
             "brent_price": round(r["brent_price"], 2) if r["brent_price"] else "",
+            "bitcoin_price": round(r["bitcoin_price"], 2) if r.get("bitcoin_price") else "",
         })
 
     # History CSV
@@ -175,6 +187,7 @@ def generate_history(conn):
             "index_value": round(r["index_value"], 2),
             "wti_price": round(r["wti_price"], 2) if r["wti_price"] else None,
             "brent_price": round(r["brent_price"], 2) if r["brent_price"] else None,
+            "bitcoin_price": round(r["bitcoin_price"], 2) if r.get("bitcoin_price") else None,
         })
 
     write_json(EXPORT_DIR / "oil-markets-history.json", {

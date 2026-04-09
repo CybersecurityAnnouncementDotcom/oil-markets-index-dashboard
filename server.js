@@ -27,6 +27,15 @@ db.exec(`
 `);
 db.exec('CREATE INDEX IF NOT EXISTS idx_readings_timestamp ON readings(timestamp)');
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bitcoin_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    price REAL NOT NULL
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_bitcoin_timestamp ON bitcoin_data(timestamp)');
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 // ---------------------------------------------------------------------------
@@ -274,6 +283,61 @@ app.get('/api/sp500-history', apiLimiter, requireAuth, (req, res) => {
   }
 });
 
+// GET /api/bitcoin-history?range=1H|1D|1W|1Y|MAX
+app.get('/api/bitcoin-history', apiLimiter, requireAuth, (req, res) => {
+  try {
+    const range = req.query.range || '1Y';
+    let since;
+    const now = new Date();
+
+    switch (range) {
+      case '1H':
+        since = new Date(now - 60 * 60 * 1000).toISOString();
+        break;
+      case '1D':
+        since = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+        break;
+      case '1W':
+        since = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+        break;
+      case '1Y':
+        since = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
+        break;
+      case 'MAX':
+        since = '1900-01-01T00:00:00.000Z';
+        break;
+      default:
+        since = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    let readings;
+    if (range === 'MAX' || range === '1Y') {
+      readings = db.prepare(`
+        SELECT
+          MIN(timestamp) as timestamp,
+          ROUND(AVG(price), 2) as price
+        FROM bitcoin_data
+        WHERE timestamp >= ?
+        GROUP BY strftime('%Y-%W', timestamp)
+        ORDER BY timestamp ASC
+      `).all(since);
+      // Append the very latest reading so the chart extends to today
+      const latestReading = db.prepare('SELECT timestamp, price FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
+      if (latestReading && (readings.length === 0 || readings[readings.length - 1].timestamp !== latestReading.timestamp)) {
+        readings.push(latestReading);
+      }
+    } else {
+      readings = db.prepare(
+        'SELECT timestamp, price FROM bitcoin_data WHERE timestamp >= ? ORDER BY timestamp ASC'
+      ).all(since);
+    }
+
+    res.json({ readings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/readings — store new reading (internal only — called by fetch script on localhost)
 app.post('/api/readings', (req, res) => {
   // Only allow from localhost (server's own fetch script)
@@ -362,10 +426,11 @@ app.get('/api/export/json', exportLimiter, requireAuth, requirePro, (req, res) =
     }
 
     const readings = db.prepare(`
-      SELECT date(timestamp) as date, MAX(timestamp) as timestamp,
-             value as index_value, wti_price, brent_price
-      FROM readings WHERE timestamp >= ?
-      GROUP BY date(timestamp) ORDER BY date ASC
+      SELECT date(r.timestamp) as date, MAX(r.timestamp) as timestamp,
+             r.value as index_value, r.wti_price, r.brent_price,
+             (SELECT bd.price FROM bitcoin_data bd WHERE date(bd.timestamp) = date(r.timestamp) ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
+      FROM readings r WHERE r.timestamp >= ?
+      GROUP BY date(r.timestamp) ORDER BY date ASC
     `).all(since);
 
     res.setHeader('Content-Disposition', `attachment; filename="oil-markets-index-${range}.json"`);
@@ -409,15 +474,16 @@ app.get('/api/export/csv', exportLimiter, requireAuth, requirePro, (req, res) =>
     }
 
     const readings = db.prepare(`
-      SELECT date(timestamp) as date, MAX(timestamp) as timestamp,
-             value as index_value, wti_price, brent_price
-      FROM readings WHERE timestamp >= ?
-      GROUP BY date(timestamp) ORDER BY date ASC
+      SELECT date(r.timestamp) as date, MAX(r.timestamp) as timestamp,
+             r.value as index_value, r.wti_price, r.brent_price,
+             (SELECT bd.price FROM bitcoin_data bd WHERE date(bd.timestamp) = date(r.timestamp) ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
+      FROM readings r WHERE r.timestamp >= ?
+      GROUP BY date(r.timestamp) ORDER BY date ASC
     `).all(since);
 
-    let csv = 'date,index_value,wti_price,brent_price\n';
+    let csv = 'date,index_value,wti_price,brent_price,bitcoin_price\n';
     for (const r of readings) {
-      csv += `${r.date},${r.index_value},${r.wti_price || ''},${r.brent_price || ''}\n`;
+      csv += `${r.date},${r.index_value},${r.wti_price || ''},${r.brent_price || ''},${r.bitcoin_price || ''}\n`;
     }
 
     res.setHeader('Content-Type', 'text/csv');
@@ -471,6 +537,49 @@ setInterval(fetchAndStore, 60000);
 
 // Initial fetch on startup
 setTimeout(fetchAndStore, 5000);
+
+// Fetch Bitcoin data from yfinance
+function fetchAndStoreBitcoin() {
+  try {
+    const pythonPath = path.join(__dirname, 'fetch_bitcoin.py');
+    const result = execSync(`python3 "${pythonPath}"`, {
+      timeout: 30000,
+      encoding: 'utf-8'
+    });
+    const data = JSON.parse(result.trim());
+    if (data.error) {
+      console.error('Bitcoin fetch error:', data.error);
+      return;
+    }
+
+    // Glitch protection: reject >30% drops (bitcoin is volatile)
+    const last = db.prepare('SELECT * FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
+    if (last && data.bitcoin_price < last.price * 0.7) {
+      console.warn('Bitcoin rejected: >30% drop', data.bitcoin_price, 'vs', last.price);
+      return;
+    }
+
+    // Duplicate prevention: skip if price change < 1.0
+    if (last && Math.abs(data.bitcoin_price - last.price) < 1.0) {
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO bitcoin_data (timestamp, price) VALUES (?, ?)'
+    ).run(timestamp, data.bitcoin_price);
+
+    console.log(`[${new Date().toLocaleTimeString()}] Bitcoin: $${data.bitcoin_price}`);
+  } catch (err) {
+    console.error('Bitcoin fetch error:', err.message);
+  }
+}
+
+// Schedule Bitcoin fetching every 60 seconds
+setInterval(fetchAndStoreBitcoin, 60000);
+
+// Initial Bitcoin fetch on startup (staggered after oil fetch)
+setTimeout(fetchAndStoreBitcoin, 8000);
 
 // ---------------------------------------------------------------------------
 // Auth proxy: forward /api/auth/* to auth server at localhost:5010
