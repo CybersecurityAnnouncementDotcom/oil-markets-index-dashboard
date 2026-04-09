@@ -1,6 +1,6 @@
 const express = require('express');
 const Database = require('better-sqlite3');
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { rateLimiter } = require('./rate-limiter');
@@ -495,41 +495,43 @@ app.get('/api/export/csv', exportLimiter, requireAuth, requirePro, (req, res) =>
   }
 });
 
-// Fetch fresh data from yfinance
+// Fetch fresh data from yfinance (non-blocking async exec)
 function fetchAndStore() {
-  try {
-    const pythonPath = path.join(__dirname, 'fetch_oil.py');
-    const result = execSync(`python3 "${pythonPath}"`, {
-      timeout: 30000,
-      encoding: 'utf-8'
-    });
-    const data = JSON.parse(result.trim());
-    if (data.error) {
-      console.error('Fetch error:', data.error);
+  const pythonPath = path.join(__dirname, 'fetch_oil.py');
+  exec(`python3 "${pythonPath}"`, { timeout: 30000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('Fetch error:', err.message);
       return;
     }
+    try {
+      const data = JSON.parse(stdout.trim());
+      if (data.error) {
+        console.error('Fetch error:', data.error);
+        return;
+      }
 
-    // Glitch protection
-    const last = db.prepare('SELECT * FROM readings ORDER BY timestamp DESC LIMIT 1').get();
-    if (last && data.index_value < last.value * 0.8) {
-      console.warn('Rejected: >20% drop', data.index_value, 'vs', last.value);
-      return;
+      // Glitch protection
+      const last = db.prepare('SELECT * FROM readings ORDER BY timestamp DESC LIMIT 1').get();
+      if (last && data.index_value < last.value * 0.8) {
+        console.warn('Rejected: >20% drop', data.index_value, 'vs', last.value);
+        return;
+      }
+
+      // Duplicate prevention
+      if (last && Math.abs(data.index_value - last.value) < 0.01) {
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      db.prepare(
+        'INSERT INTO readings (timestamp, value, wti_price, brent_price) VALUES (?, ?, ?, ?)'
+      ).run(timestamp, data.index_value, data.wti_price, data.brent_price);
+
+      console.log(`[${new Date().toLocaleTimeString()}] Stored: Index=${data.index_value} WTI=$${data.wti_price} Brent=$${data.brent_price}`);
+    } catch (parseErr) {
+      console.error('Fetch error:', parseErr.message);
     }
-
-    // Duplicate prevention
-    if (last && Math.abs(data.index_value - last.value) < 0.01) {
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
-    db.prepare(
-      'INSERT INTO readings (timestamp, value, wti_price, brent_price) VALUES (?, ?, ?, ?)'
-    ).run(timestamp, data.index_value, data.wti_price, data.brent_price);
-
-    console.log(`[${new Date().toLocaleTimeString()}] Stored: Index=${data.index_value} WTI=$${data.wti_price} Brent=$${data.brent_price}`);
-  } catch (err) {
-    console.error('Fetch error:', err.message);
-  }
+  });
 }
 
 // Schedule fetching every 60 seconds
@@ -538,48 +540,50 @@ setInterval(fetchAndStore, 60000);
 // Initial fetch on startup
 setTimeout(fetchAndStore, 5000);
 
-// Fetch Bitcoin data from yfinance
+// Fetch Bitcoin data from yfinance (non-blocking async exec)
 function fetchAndStoreBitcoin() {
-  try {
-    const pythonPath = path.join(__dirname, 'fetch_bitcoin.py');
-    const result = execSync(`python3 "${pythonPath}"`, {
-      timeout: 30000,
-      encoding: 'utf-8'
-    });
-    const data = JSON.parse(result.trim());
-    if (data.error) {
-      console.error('Bitcoin fetch error:', data.error);
+  const pythonPath = path.join(__dirname, 'fetch_bitcoin.py');
+  exec(`python3 "${pythonPath}"`, { timeout: 30000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('Bitcoin fetch error:', err.message);
       return;
     }
+    try {
+      const data = JSON.parse(stdout.trim());
+      if (data.error) {
+        console.error('Bitcoin fetch error:', data.error);
+        return;
+      }
 
-    // Glitch protection: reject >30% drops (bitcoin is volatile)
-    const last = db.prepare('SELECT * FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
-    if (last && data.bitcoin_price < last.price * 0.7) {
-      console.warn('Bitcoin rejected: >30% drop', data.bitcoin_price, 'vs', last.price);
-      return;
+      // Glitch protection: reject >30% drops (bitcoin is volatile)
+      const last = db.prepare('SELECT * FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
+      if (last && data.bitcoin_price < last.price * 0.7) {
+        console.warn('Bitcoin rejected: >30% drop', data.bitcoin_price, 'vs', last.price);
+        return;
+      }
+
+      // Duplicate prevention: skip if price change < 1.0
+      if (last && Math.abs(data.bitcoin_price - last.price) < 1.0) {
+        return;
+      }
+
+      const timestamp = new Date().toISOString();
+      db.prepare(
+        'INSERT INTO bitcoin_data (timestamp, price) VALUES (?, ?)'
+      ).run(timestamp, data.bitcoin_price);
+
+      console.log(`[${new Date().toLocaleTimeString()}] Bitcoin: $${data.bitcoin_price}`);
+    } catch (parseErr) {
+      console.error('Bitcoin fetch error:', parseErr.message);
     }
-
-    // Duplicate prevention: skip if price change < 1.0
-    if (last && Math.abs(data.bitcoin_price - last.price) < 1.0) {
-      return;
-    }
-
-    const timestamp = new Date().toISOString();
-    db.prepare(
-      'INSERT INTO bitcoin_data (timestamp, price) VALUES (?, ?)'
-    ).run(timestamp, data.bitcoin_price);
-
-    console.log(`[${new Date().toLocaleTimeString()}] Bitcoin: $${data.bitcoin_price}`);
-  } catch (err) {
-    console.error('Bitcoin fetch error:', err.message);
-  }
+  });
 }
 
-// Schedule Bitcoin fetching every 60 seconds
+// Schedule Bitcoin fetching every 60 seconds (staggered 30s from oil)
 setInterval(fetchAndStoreBitcoin, 60000);
 
 // Initial Bitcoin fetch on startup (staggered after oil fetch)
-setTimeout(fetchAndStoreBitcoin, 8000);
+setTimeout(fetchAndStoreBitcoin, 35000);
 
 // ---------------------------------------------------------------------------
 // Auth proxy: forward /api/auth/* to auth server at localhost:5010

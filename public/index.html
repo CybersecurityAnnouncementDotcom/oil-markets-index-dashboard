@@ -20,9 +20,9 @@
       --text: #e8e2d6;
       --text-muted: #998d7a;
       --text-faint: #6b5f4e;
-      --gold: #f0a030;
-      --gold-dim: #c07e1e;
-      --gold-glow: rgba(240, 160, 48, 0.12);
+      --gold: #FFD700;
+      --gold-dim: #d4b200;
+      --gold-glow: rgba(255, 215, 0, 0.12);
       --green: #00d4aa;
       --green-dim: rgba(0, 212, 170, 0.12);
       --red: #ff4444;
@@ -879,8 +879,8 @@
         {
           label: 'Oil Markets Index',
           data: chartIndex,
-          borderColor: '#f0a030',
-          backgroundColor: pctMode ? 'rgba(240, 160, 48, 0.03)' : 'rgba(240, 160, 48, 0.05)',
+          borderColor: '#FFD700',
+          backgroundColor: pctMode ? 'rgba(255, 215, 0, 0.03)' : 'rgba(255, 215, 0, 0.05)',
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 4,
@@ -1006,7 +1006,7 @@
                 const sp500Pct = pctMode ? chartSP[idx] : null;
                 const btcPct = pctMode ? chartBTC[idx] : null;
                 let html = `<div style="color:#8a7e68;font-size:11px;margin-bottom:4px;font-family:DM Sans,sans-serif">${dateStr}</div>`;
-                html += `<div style="color:#d4af37;font-weight:600">Oil Index: ${formatIndex(reading.value)}${oilPct != null ? ' (' + (oilPct >= 0 ? '+' : '') + oilPct.toFixed(2) + '%)' : ''}</div>`;
+                html += `<div style="color:#FFD700;font-weight:600">Oil Index: ${formatIndex(reading.value)}${oilPct != null ? ' (' + (oilPct >= 0 ? '+' : '') + oilPct.toFixed(2) + '%)' : ''}</div>`;
                 const sp500Val = sp500Data[idx];
                 if (sp500Val != null) {
                   html += `<div style="color:#6eb5ff;margin-top:2px">S&P 500: ${formatIndex(sp500Val)}${sp500Pct != null ? ' (' + (sp500Pct >= 0 ? '+' : '') + sp500Pct.toFixed(2) + '%)' : ''}</div>`;
