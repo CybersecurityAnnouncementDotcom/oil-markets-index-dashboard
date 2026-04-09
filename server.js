@@ -309,15 +309,51 @@ app.post('/api/readings', (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Pro-only: CSV/JSON export endpoints
+// Serve pre-generated files from data/exports/ when available,
+// fall back to live DB queries if files don't exist yet.
 // ---------------------------------------------------------------------------
 
-// GET /api/export/json?range=MAX — full data export as JSON
+const EXPORT_DIR = path.join(__dirname, 'data', 'exports');
+const DAILY_DIR = path.join(EXPORT_DIR, 'daily');
+
+// Helper: try to serve a pre-generated file, return false if not found
+function tryServeFile(filePath, contentType, downloadName, res) {
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
+    res.setHeader('X-Export-Source', 'pre-generated');
+    return res.sendFile(filePath);
+  }
+  return false;
+}
+
+// --- JSON export ---
 app.get('/api/export/json', exportLimiter, requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
+
+    // Try pre-generated files first
+    if (range === 'MAX') {
+      const file = path.join(EXPORT_DIR, 'oil-markets-history.json');
+      if (fs.existsSync(file)) return tryServeFile(file, 'application/json', 'oil-markets-index-MAX.json', res);
+    }
+
+    // Check for today's daily snapshot
+    const today = new Date().toISOString().split('T')[0];
+    if (range === '1D' || range === 'latest') {
+      const file = path.join(DAILY_DIR, `${today}.json`);
+      if (fs.existsSync(file)) return tryServeFile(file, 'application/json', `oil-markets-index-${today}.json`, res);
+    }
+
+    // Latest snapshot
+    const latestFile = path.join(EXPORT_DIR, 'oil-markets-latest.json');
+    if (range === 'latest' && fs.existsSync(latestFile)) {
+      return tryServeFile(latestFile, 'application/json', 'oil-markets-latest.json', res);
+    }
+
+    // Fallback: live DB query — consolidated to 1 row per day
     const now = new Date();
     let since = '1900-01-01T00:00:00.000Z';
-
     switch (range) {
       case '1W': since = new Date(now - 7 * 86400000).toISOString(); break;
       case '1M': since = new Date(now - 30 * 86400000).toISOString(); break;
@@ -325,24 +361,46 @@ app.get('/api/export/json', exportLimiter, requireAuth, requirePro, (req, res) =
       case 'MAX': default: since = '1900-01-01T00:00:00.000Z';
     }
 
-    const readings = db.prepare(
-      'SELECT timestamp, value as index_value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
-    ).all(since);
+    const readings = db.prepare(`
+      SELECT date(timestamp) as date, MAX(timestamp) as timestamp,
+             value as index_value, wti_price, brent_price
+      FROM readings WHERE timestamp >= ?
+      GROUP BY date(timestamp) ORDER BY date ASC
+    `).all(since);
 
     res.setHeader('Content-Disposition', `attachment; filename="oil-markets-index-${range}.json"`);
+    res.setHeader('X-Export-Source', 'live-query');
     res.json({ export_date: new Date().toISOString(), range, record_count: readings.length, data: readings });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/export/csv?range=MAX — full data export as CSV
+// --- CSV export ---
 app.get('/api/export/csv', exportLimiter, requireAuth, requirePro, (req, res) => {
   try {
     const range = req.query.range || 'MAX';
+
+    // Try pre-generated files first
+    if (range === 'MAX') {
+      const file = path.join(EXPORT_DIR, 'oil-markets-history.csv');
+      if (fs.existsSync(file)) return tryServeFile(file, 'text/csv', 'oil-markets-index-MAX.csv', res);
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    if (range === '1D' || range === 'latest') {
+      const file = path.join(DAILY_DIR, `${today}.csv`);
+      if (fs.existsSync(file)) return tryServeFile(file, 'text/csv', `oil-markets-index-${today}.csv`, res);
+    }
+
+    const latestFile = path.join(EXPORT_DIR, 'oil-markets-latest.csv');
+    if (range === 'latest' && fs.existsSync(latestFile)) {
+      return tryServeFile(latestFile, 'text/csv', 'oil-markets-latest.csv', res);
+    }
+
+    // Fallback: live DB query — consolidated to 1 row per day
     const now = new Date();
     let since = '1900-01-01T00:00:00.000Z';
-
     switch (range) {
       case '1W': since = new Date(now - 7 * 86400000).toISOString(); break;
       case '1M': since = new Date(now - 30 * 86400000).toISOString(); break;
@@ -350,17 +408,21 @@ app.get('/api/export/csv', exportLimiter, requireAuth, requirePro, (req, res) =>
       case 'MAX': default: since = '1900-01-01T00:00:00.000Z';
     }
 
-    const readings = db.prepare(
-      'SELECT timestamp, value as index_value, wti_price, brent_price FROM readings WHERE timestamp >= ? ORDER BY timestamp ASC'
-    ).all(since);
+    const readings = db.prepare(`
+      SELECT date(timestamp) as date, MAX(timestamp) as timestamp,
+             value as index_value, wti_price, brent_price
+      FROM readings WHERE timestamp >= ?
+      GROUP BY date(timestamp) ORDER BY date ASC
+    `).all(since);
 
-    let csv = 'timestamp,index_value,wti_price,brent_price\n';
+    let csv = 'date,index_value,wti_price,brent_price\n';
     for (const r of readings) {
-      csv += `${r.timestamp},${r.index_value},${r.wti_price || ''},${r.brent_price || ''}\n`;
+      csv += `${r.date},${r.index_value},${r.wti_price || ''},${r.brent_price || ''}\n`;
     }
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="oil-markets-index-${range}.csv"`);
+    res.setHeader('X-Export-Source', 'live-query');
     res.send(csv);
   } catch (err) {
     res.status(500).json({ error: err.message });
