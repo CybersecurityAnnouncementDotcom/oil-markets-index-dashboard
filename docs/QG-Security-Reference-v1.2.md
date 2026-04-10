@@ -6,8 +6,8 @@
 
 | Field | Value |
 |---|---|
-| **Version** | 1.1 |
-| **Last Updated** | April 2026 (Thread 24) |
+| **Version** | 1.2 |
+| **Last Updated** | April 2026 (Thread 25) |
 | **Owner** | jq_007@yahoo.com |
 | **Classification** | INTERNAL ONLY |
 | **Scope** | All QG infrastructure, VPS, dashboards, auth, and deployment |
@@ -18,7 +18,7 @@
 
 ### Purpose
 
-This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 24 and all prior threads.
+This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 25 and all prior threads.
 
 ### Classification
 
@@ -37,7 +37,7 @@ This document consolidates every security measure protecting the QuantitativeGen
 | API key theft | SHA-256 hash storage only; plaintext never persisted |
 | Free access circumvention | 100% off promo codes deprecated; per-product key validation |
 | DB corruption on deploy | deploy-guard.sh / deploy-done.sh mandatory workflow |
-| OOM-induced corruption | 2 GB swap file; auto-update cron removed |
+| OOM-induced corruption | 2 GB swap file; auto-update cron removed; nightly export stops PM2 first (Thread 25) |
 | Privilege escalation | `support` user has no passwordless sudo |
 | Supply chain / credential leak | No GitHub credentials stored on VPS; private repos not cloned |
 | Bitcoin data injection | BTC fetch uses HTTPS to Yahoo Finance; read-only external call (Thread 24) |
@@ -521,14 +521,19 @@ grep swap /etc/fstab
 
 The auto-update cron that previously ran `git pull` on a schedule was **permanently removed on April 6, 2026**. It was identified as the root cause of DB corruption incident #1.
 
+### Nightly Export Cron (Thread 25)
+
+A system crontab runs `/home/support/nightly-export.sh` at 4:00 AM UTC (9:00 PM PDT) daily. This is the ONLY authorized cron entry for the `support` user. It safely stops Oil + World PM2 processes before running `generate_exports.py`, then restarts and health-checks. This prevents OOM crashes that occurred when exports ran alongside active dashboards.
+
 **Verification command:**
 
 ```bash
 crontab -l
-# Expected output: no crontab for support
+# Expected output: 0 4 * * * /home/support/nightly-export.sh
+# No other entries should exist
 ```
 
-This must be verified on every deployment session. If any crontab entries are found for the `support` user, they must be removed immediately.
+This must be verified on every deployment session. If any crontab entries OTHER than the nightly export are found, they must be investigated immediately.
 
 ### SSL / TLS
 
@@ -676,7 +681,7 @@ Run this checklist at the start of every deployment session and after every depl
 
 ### Pre-Deployment Checks
 
-- [ ] `crontab -l` returns `"no crontab for support"` — no automated tasks running
+- [ ] `crontab -l` shows ONLY the nightly export cron (`0 4 * * * /home/support/nightly-export.sh`) — no other entries
 - [ ] All 3 dashboards return **HTTP 200** on their health endpoints
 - [ ] All DBs pass `PRAGMA integrity_check` (returns `ok`)
 - [ ] No deploy-guard lock files remain from previous sessions: `ls /tmp/deploy-guard-*.lock`
@@ -701,7 +706,7 @@ Run this checklist at the start of every deployment session and after every depl
 
 - [ ] SSL certificate expiry — renew before July 1, 2026
 - [ ] Review Stripe restricted key permissions — confirm no scope creep
-- [ ] Confirm no new crontab entries: `crontab -l` for `support` and `root`
+- [ ] Confirm crontab has only the nightly export: `crontab -l` for `support` (should show only `0 4 * * *`) and `root` (should be empty)
 - [ ] Review PM2 logs for anomalous 403/429 spikes: `pm2 logs --lines 200`
 - [ ] Confirm swap file still active: `free -h` (Thread 24 — added to monthly checklist)
 - [ ] Confirm `bitcoin_data` tables are accumulating data in both Oil and World DBs (Thread 24)
@@ -716,6 +721,8 @@ Run this checklist at the start of every deployment session and after every depl
 | Auth server port | `5010` |
 | deploy-guard script | `/home/support/deploy-guard.sh` |
 | deploy-done script | `/home/support/deploy-done.sh` |
+| nightly export script | `/home/support/nightly-export.sh` |
+| nightly export log | `/home/support/nightly-export.log` |
 | Nginx rate limit config | `/etc/nginx/snippets/rate-limit.conf` |
 | Swap file | `/swapfile` (2GB, permanent via /etc/fstab) |
 | Dashboard 1 (port 5000) | `/home/support/oil-markets-index-dashboard/` |
@@ -736,7 +743,9 @@ Run this checklist at the start of every deployment session and after every depl
 | April 7, 2026 | DB corruption | Stale branch checkout overwrote DB file | Restored DB; switched to file-specific checkout |
 | April 8, 2026 | DB corruption | `git reset --hard` ran while PM2 was running | Restored DB; deploy-guard system implemented |
 | April 8, 2026 | All 3 sites down ~7 hours (OOM crash) | e2-micro (958MB RAM) with no swap; OOM killer cascaded into full freeze; GCP auto-rebooted after ~7h | Created 2GB `/swapfile` (permanent via `/etc/fstab`) |
+| April 10, 2026 | OOM crash — load spike to 52 | Running `generate_exports.py` via screen while all 3 dashboards active; Python + Node.js exceeded RAM | Killed runaway Python; created nightly-export.sh that stops PM2 first; installed as system cron |
+| April 10, 2026 | Oil ~18% fetch failures | Oil SQLite using `delete` journal mode; concurrent reads/writes caused "database is locked" | Switched to WAL mode: `PRAGMA journal_mode=WAL` |
 
 ---
 
-*End of QG-Security-Reference-v1.1.md*
+*End of QG-Security-Reference-v1.2.md*

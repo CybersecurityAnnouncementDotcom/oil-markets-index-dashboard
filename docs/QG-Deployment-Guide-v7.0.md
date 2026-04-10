@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 6.0 (v5.0 + Thread 24: Bitcoin overlay deployment, swap file deployment, CSV date filter fix) |
+| **Version** | 7.0 (v6.0 + Thread 25: Nightly export cron, WAL mode fix, PM2 cleanup) |
 | **Author** | QuantitativeGenius / Perplexity Computer |
 
 ---
@@ -415,17 +415,16 @@ pm2 startup              # Set PM2 to start on boot
 | cyber-dashboard | 0 | 5002 | support |
 | world-dashboard | 1 | 5001 | support |
 | oil-dashboard | 2 | 5000 | support |
-| world-export-cron | 3 | — | support (stopped) |
-| oil-export-cron | 4 | — | support |
+| (export crons removed) | — | — | See Section 18 |
 | qg-auth | varies | 5010 | root |
 
-> **Note:** PM2 IDs change after a full VM reboot or when processes are deleted and recreated. Always verify with `pm2 list` before using IDs. Reference by name when possible. Previous IDs (cyber=2, world=4, oil=5) are no longer valid after April 8 reboot.
+> **Note:** PM2 IDs change after a full VM reboot or when processes are deleted and recreated. Always verify with `pm2 list` before using IDs. Reference by name when possible. The old `oil-export-cron` and `world-export-cron` PM2 processes were removed in Thread 25 (April 10, 2026) and replaced by a system crontab (see Section 18).
 
 ### CRITICAL: Never Auto-Restart PM2 Processes
 
 Do NOT create any cron job, systemd timer, or script that runs `pm2 restart all` or `pm2 restart <name>` automatically. SQLite databases are corrupted when Node.js processes are killed mid-write. All restarts must be manual, through deployment scripts reviewed by a human.
 
-Before any deployment, verify: `crontab -l` (as support user) should return `"no crontab for support"`.
+Before any deployment, verify: `crontab -l` (as support user) should show only the nightly export cron (`0 4 * * * /home/support/nightly-export.sh`). No other entries should exist.
 
 ### deploy-guard.sh and deploy-done.sh (MANDATORY · April 8, 2026+)
 
@@ -824,9 +823,9 @@ GitHub is the single source of truth for all documentation. The VPS always pulls
 
 Each dashboard repo has a `docs/` directory containing:
 - The dashboard's methodology PDF (e.g., `Oil_Market_Index_Methodology_v4.0.pdf`)
-- `QG-Master-Reference-v24.0.md`
-- `QG-Deployment-Guide-v6.0.md` (this document)
-- `QG-Security-Reference-v1.1.md`
+- `QG-Master-Reference-v25.0.md`
+- `QG-Deployment-Guide-v7.0.md` (this document)
+- `QG-Security-Reference-v1.2.md`
 
 The three QG reference docs are duplicated across all three repos so each project is self-contained.
 
@@ -918,4 +917,52 @@ Added `generate_exports.py` to Oil dashboard, matching the World pattern. Oil CS
 
 ---
 
-*End of QG-Deployment-Guide-v6.0.md*
+## 18. Nightly Export Cron Deployment (Thread 25 · April 10, 2026)
+
+### What Was Deployed
+
+Replaced the unreliable PM2-based export crons with a system crontab that safely stops dashboards before running exports.
+
+### Problem
+
+The old `oil-export-cron` and `world-export-cron` PM2 processes had two fatal flaws:
+1. **PM2 `cron_restart` doesn’t fire for stopped processes.** Both had drifted to "stopped" state after their one-time run, so PM2 never re-triggered them.
+2. **Running `generate_exports.py` while dashboards are active causes OOM.** On April 10, running exports via screen while all 3 dashboards were active spiked load to 52 and crashed the server.
+
+### Solution
+
+1. Created `/home/support/nightly-export.sh` — stops Oil + World PM2, runs both exports, restarts, health checks
+2. Installed system crontab: `0 4 * * *` (4:00 AM UTC / 9:00 PM PDT)
+3. Removed old PM2 export crons: `pm2 delete oil-export-cron` and `pm2 delete world-export-cron`
+4. Saved PM2 state: `pm2 save`
+
+### Also Deployed: WAL Mode on Oil
+
+Oil’s SQLite was using `delete` journal mode (the legacy default), causing ~18% of fetch attempts to fail with "database is locked". Fixed with:
+
+```sql
+sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
+```
+
+### Verification
+
+```bash
+# Cron installed
+crontab -l
+# Expected: 0 4 * * * /home/support/nightly-export.sh
+
+# PM2 clean (3 processes only)
+pm2 list
+# Expected: cyber(0), world(1), oil(2) — no export crons
+
+# WAL mode confirmed
+sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
+# Expected: wal
+
+# Check export log after first run
+tail -20 /home/support/nightly-export.log
+```
+
+---
+
+*End of QG-Deployment-Guide-v7.0.md*

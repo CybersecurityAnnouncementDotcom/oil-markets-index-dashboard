@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 24.0 (Thread 24 · Bitcoin overlay both dashboards, OOM crash fix, CSV date filter fix) |
+| **Version** | 25.0 (Thread 25 · WAL mode on Oil, nightly export cron, PM2 cleanup, Bitcoin backfill on Oil) |
 | **Owner** | jq_007@yahoo.com |
 | **Brand** | QuantitativeGenius.com |
 
@@ -47,6 +47,8 @@
 18. Bitcoin Overlay (Thread 24)
 19. OOM Crash Fix (Thread 24)
 20. CSV Export Date Filter Fix (Thread 24)
+21. Nightly Export Cron (Thread 25)
+22. WAL Mode Fix (Thread 25)
 
 ---
 
@@ -144,10 +146,9 @@
 | 0 | cyber-dashboard | 5002 | online |
 | 1 | world-dashboard | 5001 | online |
 | 2 | oil-dashboard | 5000 | online |
-| 3 | world-export-cron | — | stopped |
-| 4 | oil-export-cron | — | online |
+| (none) | (export crons removed — see Section 21) | — | — |
 
-> **Note:** PM2 IDs can change after a full VM reboot or if processes are deleted and recreated. Always verify with `pm2 list` and reference by name when possible. IDs above reflect state after April 8, 2026 VM reboot.
+> **Note:** PM2 IDs can change after a full VM reboot or if processes are deleted and recreated. Always verify with `pm2 list` and reference by name when possible. IDs above reflect state after Thread 25 cleanup (April 10, 2026). The old `oil-export-cron` and `world-export-cron` PM2 processes were removed and replaced by a system cron (see Section 21).
 
 ---
 
@@ -169,7 +170,7 @@
 - **API endpoints:** `GET /api/current`, `/api/history`, `/api/sp500-history` (all requireAuth), `GET /api/bitcoin-history` (requireAuth — Thread 24), `GET /api/export/csv`, `/api/export/json` (requirePro), `GET /api/user-tier` (requireAuth), `POST /api/readings` (localhost-only)
 - **Pro export UI:** Export button visible only to Pro users in chart header
 - **CSV export format:** 5 columns · `date`, `index_value`, `wti_price`, `brent_price`, `bitcoin_price` (Thread 24: bitcoin_price column added; 1 row per trading day, consolidated by generate_exports.py)
-- **Daily export cron:** PM2 cron runs generate_exports.py at 23:55 UTC daily, writes CSV/JSON to `data/exports/` (VPS only, not in GitHub)
+- **Daily export cron:** System cron runs `nightly-export.sh` at 4:00 AM UTC (9:00 PM PDT) daily — stops PM2, runs generate_exports.py, restarts PM2 (see Section 21)
 - **Export files:** `data/exports/daily/YYYY-MM-DD.{csv,json}`, `data/exports/oil-markets-latest.{csv,json}`, `data/exports/oil-markets-history.{csv,json}`
 - **Export serving:** `tryServeFile()` serves pre-generated files first; live DB fallback uses `GROUP BY date(timestamp)` for 1 row/day
 - **No market open/closed indicator at top**
@@ -200,7 +201,7 @@
 - **Timestamp format:** fetch_data.py uses `datetime.utcnow().isoformat() + 'Z'` (Thread 20 fix: appended Z suffix so Chart.js converts UTC→local time). Frontend also appends Z to labels from the API for consistency.
 - **API endpoints:** `GET /api/composite`, `/api/history`, `/api/country-history`, `/api/countries` (all requireAuth), `GET /api/bitcoin-history` (requireAuth — Thread 24), `GET /api/export/csv`, `/api/export/json` (requirePro), `GET /api/user-tier` (requireAuth), `POST /api/readings` (localhost-only)
 - **Pro API endpoints:** `GET /api/pro/latest`, `/api/pro/history`, `/api/pro/daily/:date`, `/api/pro/dates` (all requirePro) · serve pre-generated files from `data/exports/` with live DB fallback
-- **Daily export cron:** PM2 cron runs generate_exports.py at 23:55 UTC daily, writes CSV/JSON to `data/exports/` (VPS only, not in GitHub)
+- **Daily export cron:** System cron runs `nightly-export.sh` at 4:00 AM UTC (9:00 PM PDT) daily — stops PM2, runs generate_exports.py, restarts PM2 (see Section 21)
 - **Export files:** `data/exports/daily/YYYY-MM-DD.{csv,json}`, `data/exports/world-markets-latest.{csv,json}`, `data/exports/world-markets-history.{csv,json}`, `data/exports/world-markets-history-detailed.csv`
 - **Pro export UI:** Export button visible only to Pro users in chart header
 - **Other Markets section:** Shows "Country · Index Name" on flag hover (not just ticker symbols)
@@ -428,6 +429,7 @@ git config user.email "jq_007@yahoo.com"
 ### On the Google Cloud VM
 
 - Hourly auto-update: **REMOVED** (April 6, 2026) · Was `~/auto-update.sh` running `pm2 restart all` hourly. This caused recurring SQLite database corruption by killing processes mid-write. Disabled with `crontab -r`.
+- **Nightly export cron (Thread 25):** System crontab runs `/home/support/nightly-export.sh` at `0 4 * * *` (4:00 AM UTC / 9:00 PM PDT). Stops Oil + World PM2 processes, runs both `generate_exports.py` scripts sequentially, restarts dashboards, health checks. Logs to `/home/support/nightly-export.log`. Replaces the old PM2-based `oil-export-cron` and `world-export-cron` processes (which were unreliable — PM2 `cron_restart` doesn't fire for stopped processes).
 
 ### On Perplexity Computer
 
@@ -627,7 +629,11 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 - deploy-guard.sh is MANDATORY before any VPS file modification · Known Issue #14 (April 8, 2026)
 - After world DB restore, must re-backfill S&P 500 pre-2006 data · Known Issue #15 (April 8, 2026)
 - Always deploy code to VPS after pushing to GitHub · Known Issue #16 (April 8, 2026)
-- World MAX CSV date filter fix (Thread 24): Pre-generated export file in data/exports/ was stale, showing rows starting 2006-01-02 instead of correct 2006-01-04. Fix: re-ran `python3 generate_exports.py` on VPS. world-export-cron PM2 process runs daily at 23:55 UTC.
+- World MAX CSV date filter fix (Thread 24): Pre-generated export file in data/exports/ was stale, showing rows starting 2006-01-02 instead of correct 2006-01-04. Fix: re-ran `python3 generate_exports.py` on VPS.
+- NEVER run `generate_exports.py` while PM2 dashboards are running · Known Issue #17 (Thread 25, April 10, 2026): Python export scripts consume enough memory to OOM-crash the 1GB VPS. The nightly export cron (`nightly-export.sh`) stops PM2 first. If running manually, use `deploy-guard` first.
+- Oil WAL mode fix · Known Issue #18 (Thread 25, April 10, 2026): Oil’s SQLite was in `delete` journal mode while World used `wal`. This caused ~18% of Oil fetch attempts to fail with "database is locked" when reads/writes collided. Fixed: `PRAGMA journal_mode=WAL`. All databases now use WAL.
+- PM2 `cron_restart` doesn’t fire for stopped processes · Known Issue #19 (Thread 25, April 10, 2026): The old `oil-export-cron` and `world-export-cron` PM2 processes were in "stopped" state, meaning PM2 never triggered them at 23:55 UTC. Replaced with system crontab.
+- VPS rebooted 3 times in 10 days (Apr 1, Apr 8, Apr 10) · Known Issue #20 (Thread 25): Apr 10 reboot caused by running `generate_exports.py` via screen while all dashboards were active. Load spiked to 52, OOM killed processes.
 
 ---
 
@@ -830,6 +836,17 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 - **OOM Crash Fix**: 2GB swap file documented and verified (see Section 19)
 - **CSV Date Filter Fix**: World MAX CSV stale export repaired (see Section 20)
 - GitHub commits: World 62d3201 (nearest-match BTC), Oil 815d02a (nearest-match BTC)
+
+### Thread 25 · WAL Mode, Nightly Export Cron, PM2 Cleanup, Bitcoin Backfill (April 10, 2026)
+
+- **Oil Bitcoin backfill**: Ran `backfill_bitcoin.py` on Oil — populated 4,649 BTC records from 2014-09-17 to present. Oil previously only had ~424 real-time BTC rows.
+- **OOM crash (Apr 10)**: Running `generate_exports.py` via screen while all 3 dashboards were active spiked load to 52 and OOM-killed processes. Killed runaway Python, restarted Oil dashboard.
+- **WAL mode on Oil**: Oil’s SQLite was using `delete` journal mode (causing ~18% fetch failures from lock conflicts). Switched to `wal` to match World. All databases now use WAL.
+- **Nightly export cron**: Created `/home/support/nightly-export.sh` — stops Oil + World PM2, runs both `generate_exports.py` sequentially, restarts, health checks. System cron at `0 4 * * *` (4:00 AM UTC / 9:00 PM PDT). Logs to `/home/support/nightly-export.log`.
+- **PM2 cleanup**: Removed old `oil-export-cron` (PM2 ID 4) and `world-export-cron` (PM2 ID 3). PM2 now has 3 processes only: cyber(0), world(1), oil(2).
+- **Methodology PDFs updated**: Oil v4.0, World v4.0, Cyber v3.2 — pushed to all 3 repos + VPS.
+- **QG reference docs updated**: Master v25.0, Deploy v7.0, Security v1.2.
+- **Documentation Deployment section** (Section 17) added to QG-Deployment-Guide.
 
 ---
 
@@ -1130,10 +1147,96 @@ source ~/deploy-done.sh world
 
 ### Prevention
 
-The `world-export-cron` PM2 process runs `generate_exports.py` automatically at 23:55 UTC daily. However, after any manual database modification (trim, restore, backfill), the export files must be regenerated immediately rather than waiting for the nightly cron.
+The nightly export cron (`nightly-export.sh`) runs `generate_exports.py` automatically at 4:00 AM UTC (9:00 PM PDT) daily. However, after any manual database modification (trim, restore, backfill), the export files must be regenerated immediately rather than waiting for the nightly cron.
 
 **Rule:** After any database trim, restore, or schema change affecting the export output, immediately run `python3 generate_exports.py` on the VPS (after stopping PM2 via deploy-guard).
 
 ---
 
-*End of QG-Master-Reference-v24.0.md*
+## Nightly Export Cron (Thread 25)
+
+### Overview
+
+The nightly export cron replaces the old PM2-based `oil-export-cron` and `world-export-cron` processes. Those PM2 crons were unreliable — PM2’s `cron_restart` only fires for processes in "online" state, and both had drifted to "stopped" status, meaning exports never ran.
+
+### How It Works
+
+A system crontab entry runs `/home/support/nightly-export.sh` at 4:00 AM UTC (9:00 PM PDT) daily:
+
+1. **Stop** Oil and World PM2 dashboards (prevents OOM — Python exports + Node.js dashboards exceed 1GB RAM)
+2. **Run** Oil `generate_exports.py` (with 120s timeout)
+3. **Run** World `generate_exports.py` (with 120s timeout)
+4. **Restart** Oil and World PM2 dashboards
+5. **Health check** — verifies HTTP 200 from both dashboards
+6. **Save PM2 state** — `pm2 save`
+
+Cyber dashboard stays running throughout (it has no exports).
+
+### Downtime Window
+
+Oil and World dashboards are offline for approximately 30 seconds each night at 9:00 PM PDT during the export run.
+
+### Files
+
+| File | Location |
+|---|---|
+| Export script | `/home/support/nightly-export.sh` |
+| Log file | `/home/support/nightly-export.log` |
+| System crontab | `crontab -l` as `support` user |
+| Cron expression | `0 4 * * *` (4:00 AM UTC / 9:00 PM PDT) |
+
+### Verification
+
+```bash
+# Verify cron is installed
+crontab -l
+# Expected: 0 4 * * * /home/support/nightly-export.sh
+
+# Check last export run
+tail -20 /home/support/nightly-export.log
+```
+
+### Why Not PM2 Cron?
+
+PM2’s `cron_restart` feature has a critical limitation: it only triggers for processes in "online" state. The export scripts are designed to run once and exit (not stay running), so PM2 marks them as "stopped" after completion. Once stopped, PM2 never re-triggers them. A system crontab doesn’t have this limitation.
+
+Additionally, PM2 `cron_restart` cannot stop other PM2 processes before running — the export scripts must run with dashboards stopped to avoid OOM on the memory-constrained VPS.
+
+---
+
+## WAL Mode Fix (Thread 25)
+
+### Problem
+
+Oil’s SQLite database was using `delete` journal mode (the legacy default), while World’s was using `wal` (Write-Ahead Logging). In `delete` mode, a write operation locks the entire database file. Since Oil’s server writes a new reading every 60 seconds AND serves API requests (reads) concurrently, ~18% of fetch attempts were failing with "database is locked" errors.
+
+### Fix
+
+Switched Oil’s database to WAL mode:
+
+```sql
+sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
+```
+
+This is a one-time, non-destructive change. WAL mode persists across database opens — it only needs to be set once.
+
+### Current State
+
+All QG SQLite databases now use WAL mode:
+
+| Database | Journal Mode |
+|---|---|
+| oil_markets.db | WAL |
+| world_markets.db | WAL |
+| cybersecurity.db | WAL (verify) |
+
+### Verification
+
+```bash
+sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
+# Expected: wal
+```
+
+---
+
+*End of QG-Master-Reference-v25.0.md*
