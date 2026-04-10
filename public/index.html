@@ -852,12 +852,11 @@
         btcMapped = readings.map(r => {
           const ts = new Date(r.timestamp).toISOString();
           if (useMinuteMatch) {
+            // 1H/1D: minute-level only — no date fallback (real data only)
             const minuteKey = ts.slice(0, 16);
-            if (btcMinuteMap[minuteKey] !== undefined) return btcMinuteMap[minuteKey];
-            // Fallback to date-level match (for backfill data with one entry per day)
-            const dateKey = ts.slice(0, 10);
-            return btcDateMap[dateKey] !== undefined ? btcDateMap[dateKey] : null;
+            return btcMinuteMap[minuteKey] !== undefined ? btcMinuteMap[minuteKey] : null;
           } else {
+            // 1W/1Y/MAX: date-level match (one price per day from backfill is real data)
             const dateKey = ts.slice(0, 10);
             return btcDateMap[dateKey] !== undefined ? btcDateMap[dateKey] : null;
           }
