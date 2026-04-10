@@ -42,6 +42,7 @@
 14. Bitcoin Overlay Deployment (Thread 24)
 15. Swap File Deployment (Thread 24)
 16. Deploy Guard Reminder
+17. Documentation Deployment
 
 ---
 
@@ -812,6 +813,72 @@ git checkout origin/main -- server.js public/index.html
 ```
 
 Deploying nginx last ensures the auth server and dashboards are running and healthy before traffic is routed to them.
+
+---
+
+## 17. Documentation Deployment
+
+### Source of Truth
+
+GitHub is the single source of truth for all documentation. The VPS always pulls docs from GitHub — never edit docs directly on the VPS.
+
+Each dashboard repo has a `docs/` directory containing:
+- The dashboard's methodology PDF (e.g., `Oil_Market_Index_Methodology_v4.0.pdf`)
+- `QG-Master-Reference-v24.0.md`
+- `QG-Deployment-Guide-v6.0.md` (this document)
+- `QG-Security-Reference-v1.1.md`
+
+The three QG reference docs are duplicated across all three repos so each project is self-contained.
+
+### Updating Documentation
+
+```bash
+# 1. Update docs in the workspace, push to GitHub
+# Example: updated Oil methodology
+cd oil-markets-index-dashboard
+cp updated_doc.pdf docs/
+git add docs/
+git commit -m "docs: update Oil methodology to v4.1"
+git push origin main
+
+# 2. If a QG reference doc changed, push to ALL THREE repos
+# (Master, Deploy, and Security are shared across all dashboards)
+```
+
+### Deploying Docs to VPS
+
+Use the same deploy-guard/deploy-done workflow as code:
+
+```bash
+# For EACH dashboard that has updated docs:
+source ~/deploy-guard.sh <dashboard>
+git fetch origin main
+git checkout origin/main -- docs/
+source ~/deploy-done.sh <dashboard>
+```
+
+When a shared QG reference doc changes, deploy to all three dashboards:
+
+```bash
+for dash in oil world cyber; do
+  cd /home/support/$(case $dash in
+    oil) echo oil-markets-index-dashboard;;
+    world) echo world-markets-index-dashboard;;
+    cyber) echo cybersecurity-threat-index-dashboard;;
+  esac)
+  source ~/deploy-guard.sh $dash
+  git fetch origin main
+  git checkout origin/main -- docs/
+  source ~/deploy-done.sh $dash
+done
+```
+
+### Rules
+
+- **NEVER** create or edit docs directly on the VPS
+- **NEVER** SCP/rsync docs to the VPS — always push to GitHub first, then pull
+- When updating a shared QG reference doc, update and push to ALL THREE repos, then deploy all three
+- When updating a dashboard-specific methodology PDF, only that repo needs updating
 
 ---
 
