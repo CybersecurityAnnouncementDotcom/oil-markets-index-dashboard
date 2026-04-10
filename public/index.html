@@ -841,20 +841,26 @@
       let btcMapped = [];
       if (showBTC) {
         const useMinuteMatch = ['1H', '1D'].includes(currentRange);
-        const btcMap = {};
+        const btcMinuteMap = {};
+        const btcDateMap = {};
         for (const r of btcReadings) {
-          if (useMinuteMatch) {
-            const minuteKey = r.timestamp.slice(0, 16);
-            btcMap[minuteKey] = r.price;
-          } else {
-            const dateKey = r.timestamp.slice(0, 10);
-            btcMap[dateKey] = r.price;
-          }
+          const minuteKey = r.timestamp.slice(0, 16);
+          const dateKey = r.timestamp.slice(0, 10);
+          btcMinuteMap[minuteKey] = r.price;
+          btcDateMap[dateKey] = r.price;  // last value per date wins
         }
         btcMapped = readings.map(r => {
           const ts = new Date(r.timestamp).toISOString();
-          const key = useMinuteMatch ? ts.slice(0, 16) : ts.slice(0, 10);
-          return btcMap[key] !== undefined ? btcMap[key] : null;
+          if (useMinuteMatch) {
+            const minuteKey = ts.slice(0, 16);
+            if (btcMinuteMap[minuteKey] !== undefined) return btcMinuteMap[minuteKey];
+            // Fallback to date-level match (for backfill data with one entry per day)
+            const dateKey = ts.slice(0, 10);
+            return btcDateMap[dateKey] !== undefined ? btcDateMap[dateKey] : null;
+          } else {
+            const dateKey = ts.slice(0, 10);
+            return btcDateMap[dateKey] !== undefined ? btcDateMap[dateKey] : null;
+          }
         });
       }
 

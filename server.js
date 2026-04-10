@@ -295,10 +295,10 @@ app.get('/api/bitcoin-history', apiLimiter, requireAuth, (req, res) => {
         since = new Date(now - 60 * 60 * 1000).toISOString();
         break;
       case '1D':
-        since = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+        since = new Date(now - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         break;
       case '1W':
-        since = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+        since = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         break;
       case '1Y':
         since = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
