@@ -540,42 +540,48 @@ setInterval(fetchAndStore, 60000);
 // Initial fetch on startup
 setTimeout(fetchAndStore, 5000);
 
-// Fetch Bitcoin data from yfinance (non-blocking async exec)
+// Fetch Bitcoin data via Yahoo Finance JSON API (native Node.js, no Python)
 function fetchAndStoreBitcoin() {
-  const pythonPath = path.join(__dirname, 'fetch_bitcoin.py');
-  exec(`python3 "${pythonPath}"`, { timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error('Bitcoin fetch error:', err.message);
-      return;
-    }
-    try {
-      const data = JSON.parse(stdout.trim());
-      if (data.error) {
-        console.error('Bitcoin fetch error:', data.error);
-        return;
+  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1d&range=1d';
+  const https = require('https');
+  const options = { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 };
+  https.get(url, options, (resp) => {
+    let body = '';
+    resp.on('data', (chunk) => body += chunk);
+    resp.on('end', () => {
+      try {
+        const json = JSON.parse(body);
+        const meta = json.chart.result[0].meta;
+        const price = parseFloat(meta.regularMarketPrice);
+        if (!price || price <= 0) {
+          console.error('Bitcoin: invalid price from Yahoo');
+          return;
+        }
+
+        // Glitch protection: reject >30% drops (bitcoin is volatile)
+        const last = db.prepare('SELECT * FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
+        if (last && price < last.price * 0.7) {
+          console.warn('Bitcoin rejected: >30% drop', price, 'vs', last.price);
+          return;
+        }
+
+        // Duplicate prevention: skip if price change < 1.0
+        if (last && Math.abs(price - last.price) < 1.0) {
+          return;
+        }
+
+        const timestamp = new Date().toISOString();
+        db.prepare(
+          'INSERT INTO bitcoin_data (timestamp, price) VALUES (?, ?)'
+        ).run(timestamp, price);
+
+        console.log(`[${new Date().toLocaleTimeString()}] Bitcoin: $${price}`);
+      } catch (parseErr) {
+        console.error('Bitcoin fetch error:', parseErr.message);
       }
-
-      // Glitch protection: reject >30% drops (bitcoin is volatile)
-      const last = db.prepare('SELECT * FROM bitcoin_data ORDER BY timestamp DESC LIMIT 1').get();
-      if (last && data.bitcoin_price < last.price * 0.7) {
-        console.warn('Bitcoin rejected: >30% drop', data.bitcoin_price, 'vs', last.price);
-        return;
-      }
-
-      // Duplicate prevention: skip if price change < 1.0
-      if (last && Math.abs(data.bitcoin_price - last.price) < 1.0) {
-        return;
-      }
-
-      const timestamp = new Date().toISOString();
-      db.prepare(
-        'INSERT INTO bitcoin_data (timestamp, price) VALUES (?, ?)'
-      ).run(timestamp, data.bitcoin_price);
-
-      console.log(`[${new Date().toLocaleTimeString()}] Bitcoin: $${data.bitcoin_price}`);
-    } catch (parseErr) {
-      console.error('Bitcoin fetch error:', parseErr.message);
-    }
+    });
+  }).on('error', (err) => {
+    console.error('Bitcoin fetch error:', err.message);
   });
 }
 
