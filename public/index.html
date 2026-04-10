@@ -840,21 +840,31 @@
       // Map Bitcoin data onto the same time axis
       let btcMapped = [];
       if (showBTC) {
-        const useMinuteMatch = ['1H', '1D'].includes(currentRange);
-        const btcMinuteMap = {};
+        const useNearestMatch = ['1H', '1D'].includes(currentRange);
         const btcDateMap = {};
+        const btcSorted = [];
         for (const r of btcReadings) {
-          const minuteKey = r.timestamp.slice(0, 16);
           const dateKey = r.timestamp.slice(0, 10);
-          btcMinuteMap[minuteKey] = r.price;
-          btcDateMap[dateKey] = r.price;  // last value per date wins
+          btcDateMap[dateKey] = r.price;
+          btcSorted.push({ ms: new Date(r.timestamp).getTime(), price: r.price });
+        }
+        btcSorted.sort((a, b) => a.ms - b.ms);
+        const BTC_MAX_GAP = 2 * 60 * 1000; // ±2 minutes
+        function findNearestBtc(targetMs) {
+          let lo = 0, hi = btcSorted.length - 1, best = null;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const diff = btcSorted[mid].ms - targetMs;
+            if (best === null || Math.abs(diff) < Math.abs(best.ms - targetMs)) best = btcSorted[mid];
+            if (diff < 0) lo = mid + 1; else hi = mid - 1;
+          }
+          return best && Math.abs(best.ms - targetMs) <= BTC_MAX_GAP ? best.price : null;
         }
         btcMapped = readings.map(r => {
           const ts = new Date(r.timestamp).toISOString();
-          if (useMinuteMatch) {
-            // 1H/1D: minute-level only — no date fallback (real data only)
-            const minuteKey = ts.slice(0, 16);
-            return btcMinuteMap[minuteKey] !== undefined ? btcMinuteMap[minuteKey] : null;
+          if (useNearestMatch) {
+            // 1H/1D: find nearest real BTC reading within ±2 min
+            return findNearestBtc(new Date(ts).getTime());
           } else {
             // 1W/1Y/MAX: date-level match (one price per day from backfill is real data)
             const dateKey = ts.slice(0, 10);
