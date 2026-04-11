@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 7.0 (v6.0 + Thread 25: Nightly export cron, WAL mode fix, PM2 cleanup) |
+| **Version** | 8.0 (v7.0 + Thread 26: 10x pricing, new Stripe prices/links + Thread 27: BTC independent charting fix) |
 | **Author** | QuantitativeGenius / Perplexity Computer |
 
 ---
@@ -296,8 +296,7 @@ source ~/deploy-done.sh world
 **Key files:**
 - `server.js` · Express server, 20-ticker composite, yfinance + BTC fetch every 60s, auth middleware, export endpoints, Pro API endpoints
 - `fetch_data.py` · Python script for all 20 tickers
-- `generate_exports.py` · Daily CSV/JSON export generator (run by PM2 cron)
-- `ecosystem.config.js` · PM2 config for dashboard + daily export cron
+- `generate_exports.py` · Daily CSV/JSON export generator (run by nightly-export.sh system cron)
 - `public/index.html` · Frontend with 3-line chart + BTC toggle (Thread 24) + Pro export UI
 - `data/world_markets.db` · SQLite database (DO NOT delete)
 - `data/exports/` · Pre-generated export files (VPS only, not in GitHub)
@@ -408,7 +407,7 @@ pm2 save                 # Save current process list
 pm2 startup              # Set PM2 to start on boot
 ```
 
-### Current PM2 Process Names & IDs (as of April 8, 2026 reboot)
+### Current PM2 Process Names & IDs (as of Thread 25 cleanup, April 10, 2026)
 
 | PM2 Name | PM2 ID | Port | User |
 |---|---|---|---|
@@ -498,7 +497,7 @@ systemctl reload nginx
 **Prevention Rules:**
 1. NEVER create a cron that runs `pm2 restart all` or any automated PM2 restart
 2. NEVER run backfill scripts while dashboards are running · stop PM2 first
-3. ALWAYS verify `crontab -l` returns `"no crontab for support"` after any deployment
+3. ALWAYS verify `crontab -l` shows ONLY `0 4 * * * /home/support/nightly-export.sh`
 4. ALWAYS run `PRAGMA integrity_check` on all databases after any deployment
 5. NEVER use `git checkout main --` · always `git checkout origin/main --` (Thread 19 fix)
 6. When updating World export logic, also update `generate_exports.py` AND regenerate pre-generated files
@@ -622,7 +621,7 @@ The API key system is deployed as part of the auth server. Files are embedded in
 | Cyber Pro | price_1THhspKXRVV7arrHunUc5LjR | price_1THhspKXRVV7arrHudiK0fRG |
 | Bundle Pro | price_1THhspKXRVV7arrHdcBM4qz2 ($99/mo legacy) | price_1THhsqKXRVV7arrHi6qlZUW5 ($990/yr legacy) |
 
-> **TODO:** After creating new Stripe prices at the 10x amounts, add the new price IDs to `PRO_PRICE_IDS` in `stripe-webhook.js` and create new Payment Links in the Stripe Dashboard. Update this table with the new IDs.
+> **TODO:** After adding new Stripe price IDs to `PRO_PRICE_IDS` in `stripe-webhook.js`, update this table with the new IDs. See QG-Master-Reference for full new price ID table.
 
 ---
 
@@ -978,4 +977,46 @@ tail -20 /home/support/nightly-export.log
 
 ---
 
-*End of QG-Deployment-Guide-v7.0.md*
+## 19. BTC Independent Charting Deployment (Thread 27 · April 11, 2026)
+
+### What Was Deployed
+
+BTC trades 24/7 but was previously mapped only onto main index timestamps. When oil/S&P/world markets closed, BTC would flatline or disappear from the chart. The fix appends real BTC timestamps beyond the last main index reading so the BTC line continues showing live price movement during off-hours.
+
+### Files Modified
+
+| Dashboard | File | Change |
+|---|---|---|
+| Oil | `public/index.html` | Appends BTC timestamps beyond last main reading; index/S&P show gaps during closed hours |
+| World | `public/index.html` | Appends BTC timestamps beyond last main reading; World/S&P/SSE show gaps during closed hours |
+
+### Key Commits
+
+| Dashboard | Commit | Description |
+|---|---|---|
+| Oil | 3e0108c | BTC continues charting on 1H/1D when markets are closed |
+| World | 9d94c68 | BTC continues charting on 1H/1D when markets are closed |
+
+### Deployment Steps
+
+```bash
+# STEP 1: Push updated public/index.html to GitHub for both dashboards
+
+# STEP 2: Deploy Oil dashboard
+source ~/deploy-guard.sh oil
+cd /home/support/oil-markets-index-dashboard
+git fetch origin main
+git checkout origin/main -- public/index.html
+source ~/deploy-done.sh oil
+
+# STEP 3: Deploy World dashboard
+source ~/deploy-guard.sh world
+cd /home/support/world-markets-index-dashboard
+git fetch origin main
+git checkout origin/main -- public/index.html
+source ~/deploy-done.sh world
+```
+
+---
+
+*End of QG-Deployment-Guide-v8.0.md*

@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 25.0 (Thread 25 · WAL mode on Oil, nightly export cron, PM2 cleanup, Bitcoin backfill on Oil) |
+| **Version** | 26.0 (Thread 26 · 10x pricing increase, new Stripe prices/payment links, hidden pricing pages + Thread 27 · BTC independent charting fix) |
 | **Owner** | jq_007@yahoo.com |
 | **Brand** | QuantitativeGenius.com |
 
@@ -181,6 +181,7 @@
 - **Deduplication threshold:** 0.01 (lowered from 0.5 to prevent flat lines on 1H/1D/1M)
 - **% Change Toggle (Thread 22):** A % button next to the 1H/1D/1W/1Y/MAX time range selectors. Default loads as raw price view. Both Oil Composite and S&P 500 share a single left Y-axis in all modes (no separate right axis · removed in Thread 22 per user request). When toggled to % mode, both lines are normalized to percentage change from their first visible data point. Tooltips show both raw value and % change in both modes. Y-axis shows +0.05% format in % mode. CSS class `.pct-toggle` with `.active` state (green glow). `toPctChange()` function normalizes arrays.
 - **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `oil_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode. Key commit: 815d02a (nearest-match BTC alignment).
+- **BTC independent charting (Thread 27):** BTC continues charting on 1H/1D when oil/S&P markets are closed. Appends real BTC timestamps beyond last main index reading. Index and S&P lines show as gaps (null) during closed hours. Key commit: 3e0108c.
 
 ### World Markets Index
 
@@ -208,6 +209,7 @@
 - **Countries (20):** Russia/MOEX removed
 - **% Change Toggle (Thread 22):** Same pattern as Oil. A % button next to the time range selectors. Default loads as raw price view showing World (green), S&P 500 (blue), and SSE (red) on the same Y-axis. When toggled to % mode, all three lines are normalized to percentage change from their first visible data point.
 - **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `world_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode. Key commit: 62d3201 (nearest-match BTC alignment).
+- **BTC independent charting (Thread 27):** BTC continues charting on 1H/1D when world markets are closed. Appends real BTC timestamps beyond last main index reading. World, S&P, and SSE lines show as gaps (null) during closed hours. Key commit: 9d94c68.
 
 | Country | Weight | Ticker |
 |---|---|---|
@@ -358,9 +360,9 @@
 
 | Repo | Last Commit | URL |
 |---|---|---|
-| oil-markets-index-dashboard | 815d02a (BTC nearest-match) | https://github.com/CybersecurityAnnouncementDotcom/oil-markets-index-dashboard |
-| world-markets-index-dashboard | 62d3201 (BTC nearest-match) | https://github.com/CybersecurityAnnouncementDotcom/world-markets-index-dashboard |
-| cybersecurity-threat-index-dashboard | c6c86af (rate limiting) | https://github.com/CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard |
+| oil-markets-index-dashboard | 3e0108c (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/oil-markets-index-dashboard |
+| world-markets-index-dashboard | 9d94c68 (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/world-markets-index-dashboard |
+| cybersecurity-threat-index-dashboard | e92ddbd (pricing table update) | https://github.com/CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard |
 
 ### Podcast Repos (All Public, GitHub Pages enabled)
 
@@ -588,7 +590,7 @@ db.close()
 ```bash
 pm2 list                      # Check dashboard status
 pm2 logs                      # View real-time logs
-crontab -l                    # Verify no auto-restart cron exists (should say "no crontab")
+crontab -l                    # Should show ONLY: 0 4 * * * /home/support/nightly-export.sh
 sudo nginx -t                 # Test Nginx config
 sudo systemctl restart nginx  # Restart Nginx
 sudo certbot renew --dry-run  # Test SSL renewal
@@ -653,6 +655,42 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 | Amazon Music | Submit RSS feeds at podcasters.amazon.com |
 | YouTube (Cyber) | CybersecurityAnnouncementDotcom channel |
 | YouTube (Oil) | OilMarketIndexDotcom channel |
+| Stripe | Restricted API key "Perplexity Computer" |
+
+### Stripe Pricing (Thread 26 · 10x Increase — April 11, 2026)
+
+**Current pricing tiers:**
+
+| Tier | Monthly | Yearly |
+|---|---|---|
+| Individual Basic | $390/mo | $3,900/yr |
+| Individual Pro | $590/mo | $5,900/yr |
+| All-Access Basic | $790/mo | $7,900/yr |
+| All-Access Pro | $990/mo | $9,900/yr |
+
+**New Stripe Price IDs (Thread 26):**
+
+| Product | Basic Monthly | Basic Yearly | Pro Monthly | Pro Yearly |
+|---|---|---|---|---|
+| Oil (prod_UGE7bG3qM4Bz2I) | price_1TKyPLKXRVV7arrHcOMlcCij | price_1TKyPLKXRVV7arrHkNeCyQwE | price_1TKyPLKXRVV7arrH7o3En3WM | price_1TKyPLKXRVV7arrHY8g355WV |
+| World (prod_UGE7tfjecutQJD) | price_1TKyPTKXRVV7arrHeDL1JE9n | price_1TKyPUKXRVV7arrHynLLmXUY | price_1TKyPTKXRVV7arrHiXqbaog2 | price_1TKyPTKXRVV7arrHSlbTE4Ga |
+| Cyber (prod_UGE7O0dI68hTVj) | price_1TKyPdKXRVV7arrH0ipBqF5C | price_1TKyPdKXRVV7arrHFQOpCcPT | price_1TKyPdKXRVV7arrHzT5O1iag | price_1TKyPdKXRVV7arrHCR0c3S6V |
+| Bundle (prod_UGE78JOODDPF33) | price_1TKyPmKXRVV7arrH2bOt20kF | price_1TKyPmKXRVV7arrHT3Yyqf0x | price_1TKyPnKXRVV7arrHDNWXg0Br | price_1TKyPmKXRVV7arrHHSEshvKW |
+
+**Hidden Pricing Pages (Thread 26):**
+- https://quantitativegenius.com/pricing-H-kOciugfY024DZguSarypN6fodcEbVKAH4QNBiruyk.html
+- https://quantitativegenius.com/pricing-hMNOUJ-4d98B5alVffeZo0BVka6brb5pkESLjlnOm0g.html
+
+**Legacy Pro Price IDs (kept for existing subscribers):**
+
+| Product | Monthly ($59 legacy) | Yearly ($590 legacy) |
+|---|---|---|
+| Oil Pro | price_1THhsnKXRVV7arrHEqtwMM7L | price_1THhsnKXRVV7arrHy4W5CdKb |
+| World Pro | price_1THhsoKXRVV7arrHW1dndy6D | price_1THhsoKXRVV7arrHYYV23gR5 |
+| Cyber Pro | price_1THhspKXRVV7arrHunUc5LjR | price_1THhspKXRVV7arrHudiK0fRG |
+| Bundle Pro | price_1THhspKXRVV7arrHdcBM4qz2 ($99/mo legacy) | price_1THhsqKXRVV7arrHi6qlZUW5 ($990/yr legacy) |
+
+> **TODO:** Add the new Thread 26 price IDs to `PRO_PRICE_IDS` in `stripe-webhook.js` on the auth server. Update hidden pricing page payment links to use the new Stripe payment links.
 
 ---
 
@@ -848,6 +886,24 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 - **QG reference docs updated**: Master v25.0, Deploy v7.0, Security v1.2.
 - **Documentation Deployment section** (Section 17) added to QG-Deployment-Guide.
 
+### Thread 26 · 10x Pricing Increase, New Stripe Prices & Payment Links (April 11, 2026)
+
+- **10x pricing increase**: All subscription prices increased 10x. New 4-tier structure: Individual Basic $390/mo, Individual Pro $590/mo, All-Access Basic $790/mo, All-Access Pro $990/mo.
+- **New Stripe prices**: Created new Stripe price objects for all 4 products (Oil, World, Cyber, Bundle) × 4 tiers (Basic Monthly, Basic Yearly, Pro Monthly, Pro Yearly) = 16 new price IDs. Saved to `new-stripe-prices.json`.
+- **New Stripe payment links**: Created corresponding payment links for all 16 new prices. Saved to `new-payment-links.json`.
+- **Hidden pricing pages**: Two hidden pricing HTML pages deployed to VPS at obfuscated URLs (not linked from main site). These contain the new payment links.
+- **Legacy prices preserved**: Old $59/$590 price IDs kept active for any existing subscribers.
+- **QG-Deployment-Guide updated**: Section 13 now shows new pricing table with legacy IDs below.
+- GitHub commits: Oil 80f2888, World 1587371, Cyber e92ddbd (docs: pricing table update)
+
+### Thread 27 · BTC Independent Charting Fix (April 11, 2026)
+
+- **BTC independent charting**: BTC trades 24/7 but was previously mapped only onto main index timestamps. When oil/S&P/world markets closed, BTC flatlined or disappeared. Fix appends real BTC timestamps beyond the last main reading so the BTC line continues live during off-hours. Index/S&P lines show as gaps (null) during closed hours — accurate behavior.
+- **Oil commit:** 3e0108c — `public/index.html` (24 lines added)
+- **World commit:** 9d94c68 — `public/index.html` (26 lines added)
+- **QG reference docs updated**: Master v26.0, Deploy v8.0, Security v1.3, Account Recovery updated.
+- **Methodology PDFs updated**: Oil v4.1, World v4.1, Cyber v3.3.
+
 ---
 
 ## Database Protection & Recovery
@@ -1005,7 +1061,8 @@ Both the Oil Markets Index and World Markets Index dashboards now include a Bitc
 | Database (Oil) | `oil_markets.db` |
 | Database (World) | `world_markets.db` |
 | Dedup rule | Only stores a new row if price has changed ≥ 0.01% from the last stored reading |
-| Backfill | None — BTC data accumulates from first deploy forward |
+| Backfill (Oil) | 4,649 historical records from 2014-09-17 to present via `backfill_bitcoin.py` (Thread 25) |
+| Backfill (World) | None — BTC data accumulates from first deploy forward |
 
 ### API Endpoint
 
@@ -1072,12 +1129,21 @@ The `bitcoin_price` column is added to both Oil and World export CSVs:
 - **Oil CSV:** `date, index_value, wti_price, brent_price, bitcoin_price`
 - **World CSV:** `date, composite_value, [20 country columns], bitcoin_price`
 
+### BTC Independent Charting (Thread 27 · April 11, 2026)
+
+BTC trades 24/7 but the chart previously mapped BTC data points onto main index timestamps only. When oil/S&P/world markets closed, BTC would flatline or disappear from the chart. The fix appends real BTC timestamps beyond the last main index reading, so the BTC line continues showing live price movement during off-hours. Index and S&P lines render as gaps (null) during closed hours — this is accurate since those markets are not trading.
+
+- **Oil commit:** 3e0108c — `public/index.html` (24 lines added)
+- **World commit:** 9d94c68 — `public/index.html` (26 lines added)
+
 ### Key Commits
 
 | Dashboard | Commit | Description |
 |---|---|---|
 | World | 62d3201 | BTC overlay with nearest-match algorithm |
+| World | 9d94c68 | BTC independent charting (continues when markets closed) |
 | Oil | 815d02a | BTC overlay with nearest-match algorithm |
+| Oil | 3e0108c | BTC independent charting (continues when markets closed) |
 
 ---
 

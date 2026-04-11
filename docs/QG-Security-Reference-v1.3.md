@@ -6,8 +6,8 @@
 
 | Field | Value |
 |---|---|
-| **Version** | 1.2 |
-| **Last Updated** | April 2026 (Thread 25) |
+| **Version** | 1.3 |
+| **Last Updated** | April 2026 (Thread 27) |
 | **Owner** | jq_007@yahoo.com |
 | **Classification** | INTERNAL ONLY |
 | **Scope** | All QG infrastructure, VPS, dashboards, auth, and deployment |
@@ -18,7 +18,7 @@
 
 ### Purpose
 
-This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 25 and all prior threads.
+This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 27 and all prior threads.
 
 ### Classification
 
@@ -352,7 +352,9 @@ const event = stripe.webhooks.constructEvent(
 
 ### Pro Tier Derivation
 
-A `PRO_PRICE_IDS` Set contains all **8 Pro Stripe Price IDs** (covering all dashboards and billing intervals). When a subscription event fires, the system checks whether the event's price ID is a member of this Set to determine if the user should be granted Pro tier.
+A `PRO_PRICE_IDS` Set contains all Pro Stripe Price IDs (covering all dashboards and billing intervals). When a subscription event fires, the system checks whether the event's price ID is a member of this Set to determine if the user should be granted Pro tier.
+
+> **Thread 26 (April 11, 2026):** 16 new price IDs were created for the 10x pricing increase ($390/$590/$790/$990 tiers). These new IDs must be added to the `PRO_PRICE_IDS` Set in `stripe-webhook.js`. Legacy $59/$590 IDs remain for existing subscribers. See QG-Master-Reference for the full price ID table.
 
 ```javascript
 const PRO_PRICE_IDS = new Set([
@@ -748,4 +750,4 @@ Run this checklist at the start of every deployment session and after every depl
 
 ---
 
-*End of QG-Security-Reference-v1.2.md*
+*End of QG-Security-Reference-v1.3.md*
