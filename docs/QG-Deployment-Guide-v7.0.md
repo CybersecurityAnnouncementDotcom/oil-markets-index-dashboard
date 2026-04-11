@@ -604,12 +604,25 @@ The API key system is deployed as part of the auth server. Files are embedded in
 
 ### Stripe Pro Price IDs
 
-| Product | Monthly ($59) | Yearly ($590) |
+**Current pricing (10x increase — April 11, 2026, Thread 26):**
+
+| Tier | Monthly | Yearly |
+|---|---|---|
+| Individual Basic | $390/mo | $3,900/yr |
+| Individual Pro | $590/mo | $5,900/yr |
+| All-Access Basic | $790/mo | $7,900/yr |
+| All-Access Pro | $990/mo | $9,900/yr |
+
+**Legacy Pro Price IDs (kept for existing subscribers):**
+
+| Product | Monthly ($59 legacy) | Yearly ($590 legacy) |
 |---|---|---|
 | Oil Pro | price_1THhsnKXRVV7arrHEqtwMM7L | price_1THhsnKXRVV7arrHy4W5CdKb |
 | World Pro | price_1THhsoKXRVV7arrHW1dndy6D | price_1THhsoKXRVV7arrHYYV23gR5 |
 | Cyber Pro | price_1THhspKXRVV7arrHunUc5LjR | price_1THhspKXRVV7arrHudiK0fRG |
-| Bundle Pro | price_1THhspKXRVV7arrHdcBM4qz2 ($99/mo) | price_1THhsqKXRVV7arrHi6qlZUW5 ($990/yr) |
+| Bundle Pro | price_1THhspKXRVV7arrHdcBM4qz2 ($99/mo legacy) | price_1THhsqKXRVV7arrHi6qlZUW5 ($990/yr legacy) |
+
+> **TODO:** After creating new Stripe prices at the 10x amounts, add the new price IDs to `PRO_PRICE_IDS` in `stripe-webhook.js` and create new Payment Links in the Stripe Dashboard. Update this table with the new IDs.
 
 ---
 
