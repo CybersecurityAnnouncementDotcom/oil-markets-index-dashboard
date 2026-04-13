@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 26.0 (Thread 26 · 10x pricing increase, new Stripe prices/payment links, hidden pricing pages + Thread 27 · BTC independent charting fix) |
+| **Version** | 28.0 (Thread 30 · Gold Time Machine dashboard, BMI composite weights, oil export perf fix, 100x scale documentation) |
 | **Owner** | jq_007@yahoo.com |
 | **Brand** | QuantitativeGenius.com |
 
@@ -49,6 +49,7 @@
 20. CSV Export Date Filter Fix (Thread 24)
 21. Nightly Export Cron (Thread 25)
 22. WAL Mode Fix (Thread 25)
+23. Dual Y-Axis % Mode (Thread 29)
 
 ---
 
@@ -70,10 +71,14 @@
 ·         Ubuntu 22.04 LTS, 30GB disk             ·
 ·         2GB swap file (/swapfile)               ·
 ·                                                 ·
-·  ·············· ··············· ············· · ·
-·  · Oil Markets· · World Markets· · Cybersec · · ·
-·  · Port 5000  · · Port 5001   · · Port 5002 · · ·
-·  ·············· ··············· ············· · ·
+·  ·············· ··············· ··············  ·
+·  · Oil Markets· · World Markets· · Cybersec  ·  ·
+·  · Port 5000  · · Port 5001   · · Port 5002 ·  ·
+·  ·············· ··············· ··············  ·
+·  ·············· ················                ·
+·  · Bitcoin    · · Gold       ·                  ·
+·  · Port 5003  · · Port 5004  ·                  ·
+·  ·············· ················                ·
 ·                                                 ·
 ·  Nginx (port 80/443) · subdomain routing        ·
 ·  SSL via Let's Encrypt (auto-renew)             ·
@@ -87,9 +92,10 @@
 ·   User: CybersecurityAnnouncementDotcom         ·
 ·                                                 ·
 ·   Dashboards:                                   ·
-·   · oil-markets-index-dashboard                 ·
-·   · world-markets-index-dashboard               ·
+·   · oil-markets-time-machine-dashboard                 ·
+·   · world-markets-time-machine-dashboard               ·
 ·   · cybersecurity-threat-index-dashboard        ·
+·   · qg-deploy (Bitcoin + Gold + shared pages)   ·
 ·                                                 ·
 ·   Podcasts (GitHub Pages):                      ·
 ·   · oil-market-index-podcast                    ·
@@ -146,7 +152,8 @@
 | 0 | cyber-dashboard | 5002 | online |
 | 1 | world-dashboard | 5001 | online |
 | 2 | oil-dashboard | 5000 | online |
-| (none) | (export crons removed — see Section 21) | — | — |
+| 3 | bitcoin | 5003 | online |
+| 4 | gold | 5004 | online |
 
 > **Note:** PM2 IDs can change after a full VM reboot or if processes are deleted and recreated. Always verify with `pm2 list` and reference by name when possible. IDs above reflect state after Thread 25 cleanup (April 10, 2026). The old `oil-export-cron` and `world-export-cron` PM2 processes were removed and replaced by a system cron (see Section 21).
 
@@ -154,7 +161,7 @@
 
 ## Dashboards
 
-### Oil Markets Index
+### Oil Markets Time Machine
 
 - **URL:** https://oil.quantitativegenius.com
 - **Direct:** http://136.117.206.145:5000
@@ -179,11 +186,12 @@
 - **Weekly averaging:** MAX and 1Y views use `GROUP BY strftime('%Y-%W')`
 - **1Y/MAX latest reading:** Appends current day's most recent reading to prevent being a day behind
 - **Deduplication threshold:** 0.01 (lowered from 0.5 to prevent flat lines on 1H/1D/1M)
-- **% Change Toggle (Thread 22):** A % button next to the 1H/1D/1W/1Y/MAX time range selectors. Default loads as raw price view. Both Oil Composite and S&P 500 share a single left Y-axis in all modes (no separate right axis · removed in Thread 22 per user request). When toggled to % mode, both lines are normalized to percentage change from their first visible data point. Tooltips show both raw value and % change in both modes. Y-axis shows +0.05% format in % mode. CSS class `.pct-toggle` with `.active` state (green glow). `toPctChange()` function normalizes arrays.
-- **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `oil_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode. Key commit: 815d02a (nearest-match BTC alignment).
+- **% Change Toggle (Thread 22, updated Thread 29):** A % button next to the 1H/1D/1W/1Y/MAX time range selectors. Default loads as raw price view. Both Oil Composite and S&P 500 share a single left Y-axis in all modes (no separate right axis · removed in Thread 22 per user request). When toggled to % mode, both lines are normalized to percentage change from their first visible data point. Tooltips show both raw value and % change in both modes. Y-axis shows +0.05% format in % mode. CSS class `.pct-toggle` with `.active` state (green glow). `toPctChange()` function normalizes arrays. **Dual Y-axis % mode (Thread 29):** When BTC overlay is active and BTC % change is >5x the Oil/S&P % change, chart auto-splits to dual axes (left: Oil/S&P %, right: BTC %). See Section 23.
+- **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `oil_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode (unless dual-axis triggers — see Section 23). Key commit: 815d02a (nearest-match BTC alignment).
 - **BTC independent charting (Thread 27):** BTC continues charting on 1H/1D when oil/S&P markets are closed. Appends real BTC timestamps beyond last main index reading. Index and S&P lines show as gaps (null) during closed hours. Key commit: 3e0108c.
+- **Markets-closed fix (Thread 29):** When oil/S&P readings are empty for 1H/1D (weekend/holiday) but BTC has data: shows "Markets Closed" banner, renders clean BTC-only chart on left Y-axis with proper $ formatting. Oil tooltip handles null oil data gracefully.
 
-### World Markets Index
+### World Markets Time Machine
 
 - **URL:** https://world.quantitativegenius.com
 - **Direct:** http://136.117.206.145:5001
@@ -207,8 +215,8 @@
 - **Pro export UI:** Export button visible only to Pro users in chart header
 - **Other Markets section:** Shows "Country · Index Name" on flag hover (not just ticker symbols)
 - **Countries (20):** Russia/MOEX removed
-- **% Change Toggle (Thread 22):** Same pattern as Oil. A % button next to the time range selectors. Default loads as raw price view showing World (green), S&P 500 (blue), and SSE (red) on the same Y-axis. When toggled to % mode, all three lines are normalized to percentage change from their first visible data point.
-- **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `world_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode. Key commit: 62d3201 (nearest-match BTC alignment).
+- **% Change Toggle (Thread 22, updated Thread 29):** Same pattern as Oil. A % button next to the time range selectors. Default loads as raw price view showing World (green), S&P 500 (blue), and SSE (red) on the same Y-axis. When toggled to % mode, all three lines are normalized to percentage change from their first visible data point. **Dual Y-axis % mode (Thread 29):** When BTC overlay is active and BTC % change is >5x the World/S&P/SSE % change, chart auto-splits to dual axes (left: World/S&P/SSE %, right: BTC %). See Section 23.
+- **Bitcoin overlay (Thread 24):** BTC price fetched from Yahoo Finance BTC-USD every 60 seconds via native Node.js `https.get` in server.js. Stored in `bitcoin_data` table in `world_markets.db`. Toggle: ₿ button, orange #f7931a, glow when active. Separate right Y-axis in raw mode; shared left Y-axis in % mode (unless dual-axis triggers — see Section 23). Key commit: 62d3201 (nearest-match BTC alignment).
 - **BTC independent charting (Thread 27):** BTC continues charting on 1H/1D when world markets are closed. Appends real BTC timestamps beyond last main index reading. World, S&P, and SSE lines show as gaps (null) during closed hours. Key commit: 9d94c68.
 
 | Country | Weight | Ticker |
@@ -257,6 +265,54 @@
 - **API endpoints:** `GET /api/scores` (requireAuth), `GET /api/current` (requireAuth), `GET /api/export/csv` (requirePro), `GET /api/export/json` (requirePro), `GET /api/user-tier` (requireAuth)
 - **Data write:** `POST /api/readings` (localhost-only), `POST /api/threat-types`
 
+### Bitcoin Market Index (Thread 28 · April 11, 2026)
+
+- **URL:** https://bitcoin.quantitativegenius.com
+- **Direct:** http://136.117.206.145:5003
+- **Data sources:** Yahoo Finance BTC-USD (every 60s), Yahoo Finance ^GSPC via World Markets DB (read-only), Yahoo Finance ^IXIC and ^DJI (every 5 min)
+- **Fetch intervals:** BTC every 60 seconds (constant, 24/7). NASDAQ/DJI every 5 minutes during market hours, every 30 minutes otherwise.
+- **Default state:** Opens with BTC + all three stock overlays ON, time range MAX, % mode OFF
+- **Color scheme:** Dark background, orange (#f7931a) BTC branding
+- **Big number color:** Orange (#f7931a)
+- **Chart lines:** BTC in orange (#f7931a), S&P 500 in blue (#4488ff), NASDAQ in green (#22c55e), DJI in purple (#a855f7)
+- **Stock overlay toggles:** S&P 500 (blue), NASDAQ (green), DJI (purple) — all ON by default, can be toggled OFF individually. This is opposite of Oil/World where BTC is toggled ON.
+- **Y-axis (raw mode):** BTC on left Y-axis ($), stock overlays on right Y-axis ($). Dual axes always active in raw mode since BTC (~$70k+) and stocks (~5k–48k) are on different scales.
+- **Y-axis (% mode):** See Section 23 — Dual Y-Axis % Mode.
+- **API endpoints:** `GET /api/current` (requireAuth), `GET /api/bitcoin-history` (requireAuth), `GET /api/sp500-history` (requireAuth), `GET /api/nasdaq-history` (requireAuth), `GET /api/dji-history` (requireAuth), `GET /api/export/csv` (requirePro), `GET /api/export/json` (requirePro), `GET /api/user-tier` (requireAuth)
+- **Pro export UI:** Export button visible only to Pro users in chart header
+- **CSV export format:** 5 columns · `date`, `bitcoin_price`, `sp500_price`, `nasdaq_price`, `dji_price` · 1 row per day via `GROUP BY date(timestamp)`. S&P 500 joined from World Markets DB. No pre-generated files — always live DB query.
+- **API key endpoints:** `GET /api/auth/api-key-status`, `POST /api/auth/api-key`, `DELETE /api/auth/api-key` (proxied to auth server at port 5010)
+- **Database:** `/home/support/bitcoin-market-index-dashboard/data/bitcoin_markets.db`
+- **DB tables:** `bitcoin_data` (timestamp TEXT, price REAL), `nasdaq_data` (timestamp TEXT, price REAL), `dji_data` (timestamp TEXT, price REAL)
+- **Record counts (as of April 12, 2026):** bitcoin_data: 4,251 (from 2014-09-17), nasdaq_data: 10,071 (from 1986-04-22), dji_data: 8,630 (from 1992-01-02)
+- **S&P 500 source:** Read-only from World Markets DB at `../world-markets-time-machine-dashboard/data/world_markets.db` (table `country_data`, ticker `^GSPC`)
+- **Backfill:** On server startup, automatically backfills BTC-USD (max), ^IXIC (max), ^DJI (max) from Yahoo Finance daily history if data is missing
+- **Weekly averaging:** MAX and 1Y views use `GROUP BY strftime('%Y-%W')`
+- **Deduplication threshold:** 0.01% (same as Oil/World BTC dedup)
+- **PM2 process:** bitcoin (ID 5) on port 5003
+- **GitHub repo:** `qg-deploy` → `bitcoin-market-index-dashboard/` subdirectory
+- **Key commits:** `c8af10d` (dual Y-axis % mode), `0c81927` (temporal dead zone fix)
+
+### Gold Time Machine (Thread 30 · April 13, 2026)
+
+- **URL:** https://gold.quantitativegenius.com
+- **Direct:** http://136.117.206.145:5004
+- **Data sources:** Yahoo Finance GC=F (Gold Futures), ^HUI (Gold BUGS Index), GDX (Gold Miners ETF), SI=F (Silver Futures for gold/silver ratio), ^XAU (Gold/Silver Sector Index), BTC-USD (Bitcoin overlay)
+- **Fetch intervals:** All gold/silver/mining tickers every 60 seconds via yfinance. BTC every 60 seconds via Node.js https.
+- **Default state:** Opens with GTM composite, time range MAX
+- **Color scheme:** Dark background, gold (#FFD700) branding
+- **Big number color:** Gold (#FFD700)
+- **GTM Composite weights:** GC=F 30%, ^HUI 25%, GDX 20%, GC=F/SI=F ratio 15%, ^XAU 10%
+- **GTM May 2006 gap:** Composite is empty for first ~1,424 rows (Aug 2000 – May 2006) because GDX ETF didn't exist until May 22, 2006. Individual components available from Aug 2000. This is correct — never fabricate data.
+- **100x scale discrepancy:** Chart frontend uses (component/base)*100 (values ~100-1400). CSV export uses (component/base)*10000 (values ~10000-120000). Same relative shape, different anchor. Document both, never modify real data to reconcile.
+- **API endpoints:** Same pattern as Bitcoin dashboard (requireAuth on GET, requirePro on exports)
+- **CSV export format:** Columns: date, gtm_composite, gc_price, hui_price, gdx_price, silver_price, xau_price, gold_silver_ratio, bitcoin_price. 1 row per day.
+- **Database:** /home/support/gold-time-machine-dashboard/data/gold_markets.db
+- **PM2 process:** gold (ID 4) on port 5004
+- **GitHub repo:** qg-deploy → gold-time-machine-dashboard/ subdirectory
+- **Stripe products:** Gold Time Machine Product: prod_UKDSgK35wz6GFu. Basic Monthly: price_1TLZ1fKXRVV7arrHGls7yfy6, Pro Monthly: price_1TLZ1eKXRVV7arrHDAypUc6A, Basic Yearly: price_1TLZ1fKXRVV7arrHLdFdLWSs, Pro Yearly: price_1TLZ1fKXRVV7arrH8GzM0FEh
+- **Forward-fill:** On weekends/holidays, stock components (^HUI, GDX, ^XAU) use last known closing price. Gold and silver futures report actual prices. Standard mixed-frequency approach.
+
 ### Common Dashboard Settings
 
 - **Footer:** "Sponsored by QuantitativeGenius.com"
@@ -270,7 +326,7 @@
 
 > **CRITICAL · Locked Down April 7, 2026 (Thread 19).** The data below represents the verified build. All record counts, date ranges, and sources were confirmed against the live VPS databases. Any future changes to data sources must be documented here with date, reason, and new record counts.
 
-### Oil Markets Index · Data Sources
+### Oil Markets Time Machine · Data Sources
 
 **WTI Crude Oil:**
 
@@ -292,7 +348,7 @@
 - Source: Yahoo Finance ^GSPC · stored in world DB `country_data` table (cross-database dependency)
 - Range: January 2, 1987 to present (10,464 records)
 - server.js MAX query starts from 1986-01-01 (changed from 2000-01-01 in Thread 19)
-- Path: `../world-markets-index-dashboard/data/world_markets.db`
+- Path: `../world-markets-time-machine-dashboard/data/world_markets.db`
 
 **Verified Record Counts (April 7, 2026):**
 - Composite readings: 9,918 (from May 20, 1987)
@@ -300,7 +356,7 @@
 - Brent price rows: 9,789
 - S&P 500 overlay: 10,464 records (from world DB)
 
-### World Markets Index · Data Sources
+### World Markets Time Machine · Data Sources
 
 - Source: Yahoo Finance via yfinance library · 20 country tickers (see ticker table above)
 - Live fetch interval: 60 seconds
@@ -349,6 +405,9 @@
 | April 9, 2026 | Oil | Updated server.js export endpoints with tryServeFile() + GROUP BY date | Pre-generated file serving with daily-consolidated DB fallback |
 | Thread 24 | Oil + World | Added bitcoin_data table; BTC price fetched via Node.js https.get | Bitcoin overlay on both dashboards |
 | Thread 24 | Oil + World | Added bitcoin_price column to CSV exports | Pro export includes BTC price per trading day |
+| Thread 30 | Gold | Gold Time Machine dashboard created with 5-component GTM composite | Predictive gold market composite |
+| Thread 30 | Bitcoin | BMI composite weights documented (BTC 40%, NDX 25%, SPX 20%, DJI 15%) | Prediction weights rationale |
+| Thread 30 | Oil | generate_exports.py rewritten to dictionary-based lookups | Fixed O(N*M) correlated subquery zombie/OOM |
 
 ---
 
@@ -360,9 +419,10 @@
 
 | Repo | Last Commit | URL |
 |---|---|---|
-| oil-markets-index-dashboard | 3e0108c (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/oil-markets-index-dashboard |
-| world-markets-index-dashboard | 9d94c68 (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/world-markets-index-dashboard |
+| oil-markets-time-machine-dashboard | 3e0108c (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/oil-markets-time-machine-dashboard |
+| world-markets-time-machine-dashboard | 9d94c68 (BTC independent charting) | https://github.com/CybersecurityAnnouncementDotcom/world-markets-time-machine-dashboard |
 | cybersecurity-threat-index-dashboard | e92ddbd (pricing table update) | https://github.com/CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard |
+| qg-deploy (PRIVATE) | ec5df73 (Thread 30: oil export dict-based lookup, gold dashboard) | https://github.com/CybersecurityAnnouncementDotcom/qg-deploy |
 
 ### Podcast Repos (All Public, GitHub Pages enabled)
 
@@ -505,23 +565,23 @@ pip3 install yfinance pandas
 
 # Clone all 3 repos
 cd ~
-git clone https://github.com/CybersecurityAnnouncementDotcom/oil-markets-index-dashboard.git
-git clone https://github.com/CybersecurityAnnouncementDotcom/world-markets-index-dashboard.git
+git clone https://github.com/CybersecurityAnnouncementDotcom/oil-markets-time-machine-dashboard.git
+git clone https://github.com/CybersecurityAnnouncementDotcom/world-markets-time-machine-dashboard.git
 git clone https://github.com/CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard.git
 
 # Install dependencies
-cd ~/oil-markets-index-dashboard && npm install
-cd ~/world-markets-index-dashboard && npm install
+cd ~/oil-markets-time-machine-dashboard && npm install
+cd ~/world-markets-time-machine-dashboard && npm install
 cd ~/cybersecurity-threat-index-dashboard && npm install
 
 # Backfill databases
 cd ~/cybersecurity-threat-index-dashboard && python3 seed_data.py
-cd ~/oil-markets-index-dashboard && python3 backfill.py
-cd ~/world-markets-index-dashboard && python3 backfill.py
+cd ~/oil-markets-time-machine-dashboard && python3 backfill.py
+cd ~/world-markets-time-machine-dashboard && python3 backfill.py
 
 # Start all dashboards with PM2
-cd ~/oil-markets-index-dashboard && pm2 start server.js --name oil-dashboard -- --port 5000
-cd ~/world-markets-index-dashboard && pm2 start server.js --name world-dashboard -- --port 5001
+cd ~/oil-markets-time-machine-dashboard && pm2 start server.js --name oil-dashboard -- --port 5000
+cd ~/world-markets-time-machine-dashboard && pm2 start server.js --name world-dashboard -- --port 5001
 cd ~/cybersecurity-threat-index-dashboard && pm2 start server.js --name cyber-dashboard -- --port 5002
 
 # Set PM2 to auto-start on reboot
@@ -556,7 +616,7 @@ The world backfill only covers 2006+ (when all 20 tickers have data). Oil's S&P 
 ```python
 python3 -c "
 import yfinance as yf, sqlite3
-db = sqlite3.connect('/home/support/world-markets-index-dashboard/data/world_markets.db')
+db = sqlite3.connect('/home/support/world-markets-time-machine-dashboard/data/world_markets.db')
 earliest = db.execute(\"SELECT MIN(timestamp) FROM country_data WHERE ticker='^GSPC'\").fetchone()[0]
 hist = yf.Ticker('^GSPC').history(start='2000-01-01', end=earliest[:10], interval='1d')
 for date, row in hist.iterrows():
@@ -636,6 +696,11 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 - Oil WAL mode fix · Known Issue #18 (Thread 25, April 10, 2026): Oil’s SQLite was in `delete` journal mode while World used `wal`. This caused ~18% of Oil fetch attempts to fail with "database is locked" when reads/writes collided. Fixed: `PRAGMA journal_mode=WAL`. All databases now use WAL.
 - PM2 `cron_restart` doesn’t fire for stopped processes · Known Issue #19 (Thread 25, April 10, 2026): The old `oil-export-cron` and `world-export-cron` PM2 processes were in "stopped" state, meaning PM2 never triggered them at 23:55 UTC. Replaced with system crontab.
 - VPS rebooted 3 times in 10 days (Apr 1, Apr 8, Apr 10) · Known Issue #20 (Thread 25): Apr 10 reboot caused by running `generate_exports.py` via screen while all dashboards were active. Load spiked to 52, OOM killed processes.
+- 100x Scale Discrepancy · Known Issue #21 (Thread 30, April 13, 2026): Chart frontend computes composites as (component/base)*100 while CSV export uses (component/base)*10000. Same relative movements, different anchor. Both are valid for their contexts. Never modify real data to reconcile scales.
+- GTM May 2006 Gap · Known Issue #22 (Thread 30, April 13, 2026): GTM composite is empty for first ~1,424 rows (Aug 2000 – May 2006) because GDX ETF started trading May 22, 2006. Individual components (GC=F, ^HUI, SI=F, ^XAU) have data from Aug 2000.
+- Oil export correlated subquery repeat · Known Issue #23 (Thread 30, April 13, 2026): generate_exports.py for Oil hung at 90% CPU — same O(N*M) correlated subquery pattern from Known Issue #17. Rewritten to dictionary-based lookups. Rule: NEVER use correlated subqueries on e2-micro. Always use dictionary-based or hash-join patterns.
+
+> **CRITICAL DATA INTEGRITY NOTE:** NEVER remove or modify real data to improve visual appearance. Real data must be preserved even if it creates visual anomalies in charts. This principle applies to all dashboards and all data — if real data "looks weird," the correct approach is to document the anomaly, not delete or smooth the data.
 
 ---
 
@@ -698,8 +763,8 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 
 ### Thread 1 · Original Dashboard Build + Oil Bulletins
 
-- Built Oil Markets Index dashboard
-- Built World Markets Index dashboard
+- Built Oil Markets Time Machine dashboard
+- Built World Markets Time Machine dashboard
 - Set up Oil Markets Index bulletins (multiple daily)
 - Branding updates from old brands to QuantitativeGenius.com
 - Fixed chart scaling, tooltip colors, sawtooth noise
@@ -775,7 +840,7 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 
 ### Thread 11 · Pro Export System Build (April 3, 2026)
 
-- Built daily CSV/JSON export generation system for World Markets Index Pro subscribers
+- Built daily CSV/JSON export generation system for World Markets Time Machine Pro subscribers
 - `generate_exports.py` · reads SQLite DB, writes daily snapshots
 - New `/api/pro/*` endpoints for programmatic API access
 - `ecosystem.config.js` · PM2 cron at 23:55 UTC
@@ -904,6 +969,103 @@ free -h                       # Verify swap is active (should show Swap: 2.0Gi)
 - **QG reference docs updated**: Master v26.0, Deploy v8.0, Security v1.3, Account Recovery updated.
 - **Methodology PDFs updated**: Oil v4.1, World v4.1, Cyber v3.3.
 
+### Thread 28 · Bitcoin Market Index + Meetings Page + Stock Market Time Machine (April 11, 2026)
+
+- **Bitcoin Market Index dashboard** created at `bitcoin.quantitativegenius.com` (port 5003, PM2 ID 5). BTC primary with S&P 500, NASDAQ, DJI as toggleable overlays (all ON by default). Based on Oil dashboard architecture but BTC-centric. Data: BTC-USD every 60s, NASDAQ/DJI every 5 min, S&P from World DB.
+- **Meetings/checkout page** at `/meetings` with Stripe payment links for 5/10/15/30-min phone/video meetings ($35/$65/$95/$150). Collects name, phone, email via Stripe checkout. All homepage mailto links redirected to meetings page.
+- **Stock Market Time Machine** clone site at randomized URL (`smtm-x7k9q2.html`) — mirrors homepage content with all four indices, links to meetings page.
+- **Homepage updated** from "three indices" to "four indices" across all pages.
+- **Hidden pricing pages** updated with Bitcoin Market Index card.
+- **Stripe products:** Bitcoin Basic (`prod_UJxoNlMTbSpuFF`) with Basic/Pro price tiers.
+- **Key commits (qg-deploy):** `6958558` (initial), `37ad7a1` (text cleanup), `f086124` (3→4 indices), `23cc7fe` (Bitcoin dashboard), `6756f3d` (pricing cards), `5177756` (webhook fix), `f31d988` (export/backfill).
+
+### Thread 29 · Dual Y-Axis % Mode Fix + Oil Markets-Closed Fix (April 12, 2026)
+
+- **Problem 1 — S&P 500 flat line in % mode (Bitcoin dashboard):** When % toggle was ON, S&P 500 appeared as a flat line because BTC % change (~1000%+ on MAX) compressed the stock % change (~200%) to near-zero on a shared axis.
+- **Solution — Dual Y-axis % mode:** When BTC % change range is >5x the stock % change range, chart auto-splits to dual Y-axes (left: BTC %, right: Stock %). Below 5x threshold, all lines share a single left Y-axis as before. Applied to all three dashboards: Bitcoin, Oil, World.
+- **Problem 2 — Oil 1H/1D blank when markets closed:** When oil/S&P markets are closed (weekends/holidays) and only BTC has data, the Oil 1H/1D chart showed only the BTC line with no context.
+- **Solution — Markets-closed banner:** Oil dashboard now detects empty oil readings on 1H/1D, shows a "Markets Closed" banner, and renders a clean BTC-only chart on the left Y-axis with proper $ formatting. Tooltip handles null oil data gracefully.
+- **Bug encountered:** First Bitcoin deploy broke ALL charts due to `let` temporal dead zone — `pctDualAxis` was used at line 1168 but defined at line 1222. Fixed by moving the calculation block before the dataset definitions.
+- **Bitcoin commits (qg-deploy):** `c8af10d` (dual Y-axis), `0c81927` (temporal dead zone fix)
+- **Oil fix:** Applied via SCP to VPS (not in git repo). Includes dual-axis % mode + markets-closed banner.
+- **World fix:** Applied via SCP to VPS (not in git repo). Includes dual-axis % mode.
+- **CSV export verified:** BTC CSV export confirmed working — 4,226 days of data from 2014-09-17 through today, always live DB query (no pre-generated files).
+- **QG reference docs updated**: Master v27.0, Deploy v9.0.
+
+### Thread 30 · Gold Time Machine + Documentation Round 5 (April 13, 2026)
+
+- **Gold Time Machine dashboard** deployed at gold.quantitativegenius.com (port 5004, PM2 ID 4). GTM composite with 5 components: GC=F (30%), ^HUI (25%), GDX (20%), GC=F/SI=F ratio (15%), ^XAU (10%). Based on Bitcoin dashboard architecture.
+- **Oil export zombie/OOM incident (April 13):** Oil generate_exports.py hung at 90% CPU for 8+ minutes. Root cause: correlated subquery O(N*M) in get_daily_close_readings() — same pattern as Known Issue #17 (April 10). Killed zombie PID 485163. Rewrote to dictionary-based lookups (fast mode) matching Bitcoin/Gold approach.
+- **Oil export fix pushed:** qg-deploy commit ec5df73, oil-markets commit 9f9b203. Dictionary-based lookup eliminates O(N*M) correlated subquery.
+- **100x scale discrepancy documented:** Chart frontend computes composites as (component/base)*100. CSV export computes as (component/base)*10000. Both produce same relative shape. Documented in Gold and Bitcoin methodology PDFs.
+- **GTM May 2006 gap flagged:** GTM composite empty for rows before May 22, 2006 (GDX inception date). Individual components available from Aug 2000.
+- **Bitcoin methodology updated to v2.0:** Added BMI composite weights (BTC 40%, NASDAQ 25%, S&P 20%, DJI 15%) and rationale section.
+- **Gold methodology v1.0 created:** New document covering GTM composite design, component rationale, forward-fill methodology.
+- **Nightly export updated:** nightly-export.sh now includes Bitcoin and Gold exports with timeout 120.
+- **Documentation round 5:** All reference docs updated (Master v28.0, Deploy v10.0, Security v1.4, Account Recovery updated). All methodology PDFs current.
+- **Branding rebrand (April 13):** Oil Markets Index → Oil Markets Time Machine. World Markets Index → World Markets Time Machine. Full rename including repos, VPS folders, PM2 names, methodology PDFs, and all documentation references. Bitcoin Market Index and Cybersecurity Threat Index names unchanged. Podcast names unchanged. See Branding History section for complete mapping.
+
+---
+
+## Branding History
+
+This section records all brand name changes for reference during troubleshooting. Old names may still appear in Git commit messages, log files, and historical thread descriptions.
+
+### Thread 30 Rebrand (April 13, 2026)
+
+| Component | Old Name | New Name | Notes |
+|---|---|---|---|
+| Oil dashboard display name | Oil Markets Index | Oil Markets Time Machine | All user-facing references |
+| Oil GitHub repo | oil-markets-index-dashboard | oil-markets-time-machine-dashboard | Repo rename required |
+| Oil VPS folder | /home/support/oil-markets-index-dashboard/ | /home/support/oil-markets-time-machine-dashboard/ | Folder rename + PM2 update |
+| Oil methodology PDF | Oil_Market_Index_Methodology_v4.1.pdf | Oil_Markets_Time_Machine_Methodology_v4.2.pdf | New version with rebrand |
+| Oil subdomain | oil.quantitativegenius.com | oil.quantitativegenius.com | URL unchanged |
+| World dashboard display name | World Markets Index | World Markets Time Machine | All user-facing references |
+| World GitHub repo | world-markets-index-dashboard | world-markets-time-machine-dashboard | Repo rename required |
+| World VPS folder | /home/support/world-markets-index-dashboard/ | /home/support/world-markets-time-machine-dashboard/ | Folder rename + PM2 update |
+| World methodology PDF | World_Markets_Index_Methodology_v4.1.pdf | World_Markets_Time_Machine_Methodology_v4.2.pdf | New version with rebrand |
+| World subdomain | world.quantitativegenius.com | world.quantitativegenius.com | URL unchanged |
+
+### Names NOT Changed (Thread 30)
+
+| Component | Current Name | Why Not Changed |
+|---|---|---|
+| Bitcoin dashboard | Bitcoin Market Index | Per user decision — no rebrand |
+| Cybersecurity dashboard | Cybersecurity Threat Index | Per user decision — no rebrand |
+| Gold dashboard | Gold Time Machine | Already uses Time Machine naming (created Thread 30) |
+| Oil podcast | Daily Oil Markets Index Bulletin | Podcast names kept separate from dashboard rebrand |
+| World podcast | World Market Index Podcast | Podcast names kept separate from dashboard rebrand |
+| Cyber podcast | Cybersecurity Threat Index Podcast | No dashboard rebrand, no podcast rebrand |
+| Parent brand | QuantitativeGenius.com | Unchanged |
+
+### Cross-Reference: Where Old Names May Still Appear
+
+- **Git commit messages** before Thread 30: All commits reference the old names. Do not rewrite Git history.
+- **PM2 log files** on VPS: Old PM2 names will appear in historical logs.
+- **Thread History entries** (Threads 1-29): Historical descriptions use old names intentionally — they record what happened at the time.
+- **Nginx config**: Subdomain URLs did not change, but `proxy_pass` targets may reference old folder paths until the VPS folder rename is completed.
+- **nightly-export.sh**: References old folder paths until updated on VPS.
+- **deploy-guard.sh / deploy-done.sh**: May reference old PM2 names until updated.
+- **Cross-DB dependency path**: Oil's S&P 500 overlay reads from `../world-markets-index-dashboard/data/world_markets.db` → must be updated to `../world-markets-time-machine-dashboard/data/world_markets.db` during VPS rename.
+
+### Rebrand Deployment Checklist
+
+When executing the repo/VPS rename:
+
+- [ ] Rename GitHub repos (oil-markets-index-dashboard → oil-markets-time-machine-dashboard, world-markets-index-dashboard → world-markets-time-machine-dashboard)
+- [ ] On VPS: Stop PM2 for oil and world (deploy-guard)
+- [ ] Rename VPS folders: `mv /home/support/oil-markets-index-dashboard /home/support/oil-markets-time-machine-dashboard`
+- [ ] Rename VPS folders: `mv /home/support/world-markets-index-dashboard /home/support/world-markets-time-machine-dashboard`
+- [ ] Update `server.js` cross-DB path in Oil (../world-markets-time-machine-dashboard/data/world_markets.db)
+- [ ] Update `server.js` cross-DB path in Bitcoin (../world-markets-time-machine-dashboard/data/world_markets.db)
+- [ ] Update PM2 process names if needed
+- [ ] Update nightly-export.sh paths
+- [ ] Update deploy-guard.sh / deploy-done.sh if they reference folder names
+- [ ] Update Nginx config if it references folder paths
+- [ ] Update git remote URLs in VPS repos after GitHub rename
+- [ ] Restart PM2, verify all 5 dashboards HTTP 200
+- [ ] Verify nightly export still runs correctly
+
 ---
 
 ## Database Protection & Recovery
@@ -1006,7 +1168,7 @@ GET /auth/validate-key?key=qg_...&product=prod_XXXXXXXXXXXX
 
 ## Master Calculations Reference
 
-### Oil Markets Index Formula
+### Oil Markets Time Machine Formula
 
 ```
 composite = (brent_price × 0.7) + (wti_price × 0.3)
@@ -1017,7 +1179,7 @@ index_value = (composite / 147.0) × 5000
 - Brent ATH normalization: Brent/146.08 × 5000
 - Composite weighting: 70% Brent, 30% WTI (consistent across fetch_oil.py and backfill.py)
 
-### World Markets Index Formula
+### World Markets Time Machine Formula
 
 ```
 contribution = price × weight × SCALE_FACTOR
@@ -1043,7 +1205,7 @@ A reading is **silently skipped** if the change from the previous value is less 
 
 ### Overview
 
-Both the Oil Markets Index and World Markets Index dashboards now include a Bitcoin (BTC) price overlay on their charts. This was implemented in Thread 24.
+The Oil Markets Time Machine, World Markets Time Machine, and Bitcoin Market Index dashboards all include Bitcoin (BTC) price data. On Oil and World, BTC is an optional overlay toggle (Thread 24). On the Bitcoin Market Index (Thread 28), BTC is the primary asset with S&P 500, NASDAQ, and DJI as toggleable overlays.
 
 ### Data Source
 
@@ -1120,7 +1282,7 @@ btcData.forEach(b => {
 | Button color | Orange #f7931a |
 | Glow when active | Yes |
 | Y-axis (raw mode) | Separate right Y-axis (BTC ~$80k vs index ~1–7k) |
-| Y-axis (% mode) | Shared left Y-axis (both normalized to % change) |
+| Y-axis (% mode) | Shared left Y-axis when ratio ≤5x; dual axes when ratio >5x (Thread 29 — see Section 23) |
 
 ### CSV Exports
 
@@ -1144,6 +1306,8 @@ BTC trades 24/7 but the chart previously mapped BTC data points onto main index 
 | World | 9d94c68 | BTC independent charting (continues when markets closed) |
 | Oil | 815d02a | BTC overlay with nearest-match algorithm |
 | Oil | 3e0108c | BTC independent charting (continues when markets closed) |
+| Bitcoin | c8af10d | Dual Y-axis % mode (Thread 29) |
+| Bitcoin | 0c81927 | Temporal dead zone fix for pctDualAxis (Thread 29) |
 
 ---
 
@@ -1206,7 +1370,7 @@ Re-ran `generate_exports.py` directly on the VPS:
 
 ```bash
 source ~/deploy-guard.sh world
-cd /home/support/world-markets-index-dashboard
+cd /home/support/world-markets-time-machine-dashboard
 python3 generate_exports.py
 source ~/deploy-done.sh world
 ```
@@ -1232,11 +1396,13 @@ A system crontab entry runs `/home/support/nightly-export.sh` at 4:00 AM UTC (9:
 1. **Stop** Oil and World PM2 dashboards (prevents OOM — Python exports + Node.js dashboards exceed 1GB RAM)
 2. **Run** Oil `generate_exports.py` (with 120s timeout)
 3. **Run** World `generate_exports.py` (with 120s timeout)
-4. **Restart** Oil and World PM2 dashboards
-5. **Health check** — verifies HTTP 200 from both dashboards
-6. **Save PM2 state** — `pm2 save`
+4. **Run** Bitcoin `generate_exports.py` (with 120s timeout) — added Thread 30
+5. **Run** Gold `generate_exports.py` (with 120s timeout) — added Thread 30
+6. **Restart** Oil and World PM2 dashboards
+7. **Health check** — verifies HTTP 200 from both dashboards
+8. **Save PM2 state** — `pm2 save`
 
-Cyber dashboard stays running throughout (it has no exports).
+Cyber dashboard stays running throughout (it has no exports). Bitcoin and Gold exports added in Thread 30.
 
 ### Downtime Window
 
@@ -1281,7 +1447,7 @@ Oil’s SQLite database was using `delete` journal mode (the legacy default), wh
 Switched Oil’s database to WAL mode:
 
 ```sql
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
 ```
 
 This is a one-time, non-destructive change. WAL mode persists across database opens — it only needs to be set once.
@@ -1295,14 +1461,81 @@ All QG SQLite databases now use WAL mode:
 | oil_markets.db | WAL |
 | world_markets.db | WAL |
 | cybersecurity.db | WAL (verify) |
+| bitcoin_markets.db | WAL (set on creation via server.js) |
 
 ### Verification
 
 ```bash
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
 # Expected: wal
 ```
 
 ---
 
-*End of QG-Master-Reference-v25.0.md*
+## Dual Y-Axis % Mode (Thread 29)
+
+### Problem
+
+When the % Change toggle is active and BTC is enabled alongside stock overlays, BTC's percentage change over long periods (e.g., ~1000%+ on MAX) dwarfs the stock percentage change (~200%). On a shared single Y-axis, the stock lines are compressed to near-flat, making them unreadable.
+
+### Solution — Adaptive Dual Y-Axes
+
+A dynamic threshold-based system detects when dual axes are needed:
+
+```javascript
+let pctDualAxis = false;
+const maxBtcPct = Math.max(...btcPctData.filter(v => v !== null).map(Math.abs));
+const maxStockPct = Math.max(...stockPctData.filter(v => v !== null).map(Math.abs));
+// If BTC % range is > 5x the stock % range, use dual axes
+if (maxStockPct > 0 && maxBtcPct / maxStockPct > 5) {
+  pctDualAxis = true;
+}
+```
+
+### Behavior
+
+| Condition | Y-Axis Layout |
+|---|---|
+| % mode OFF (raw prices) | Left: primary asset ($), Right: overlays ($) — always dual |
+| % mode ON, BTC/stock ratio ≤ 5x | Single shared left Y-axis (all lines as % change) |
+| % mode ON, BTC/stock ratio > 5x | Left: BTC % change, Right: Stock % change — dual axes |
+| % mode ON, only one line visible | Single left Y-axis |
+
+### Axis Labels
+
+- **Bitcoin dashboard:** Left = "BTC % Change", Right = "Stock % Change" (when dual). Left = "% Change" (when shared).
+- **Oil dashboard:** Left = "Bitcoin (USD)" or "Oil / S&P % Change" (when dual in % mode). Right = "BTC % Change" (when dual).
+- **World dashboard:** Left = "BTC % Change" or "% Change", Right = "Stock % Change" (when dual).
+
+### Threshold
+
+The 5x ratio was chosen empirically:
+- On MAX view, BTC since 2014 shows ~1000%+ change while S&P shows ~200% — ratio ~5x+, dual axes activate.
+- On 1W/1M views, BTC and stocks often move within similar %, so they share a single axis.
+- The threshold adapts automatically to the visible time range.
+
+### Dashboards Affected
+
+| Dashboard | Commit | Method |
+|---|---|---|
+| Bitcoin | `c8af10d`, `0c81927` (fix) | Git push → VPS pull |
+| Oil | SCP to VPS (not in git) | Direct file deploy |
+| World | SCP to VPS (not in git) | Direct file deploy |
+
+### Markets-Closed Banner (Oil Only)
+
+When oil/S&P readings are empty for 1H/1D (weekends/holidays) but BTC has data:
+
+1. A "Markets Closed" banner appears above the chart
+2. Chart renders BTC-only on the left Y-axis with proper `$` formatting
+3. Tooltip gracefully handles null oil data using `indexData[idx]` check
+4. Right Y-axis is hidden (no stock data to display)
+
+### Known Edge Cases
+
+- **S&P 500 line stops before BTC on weekends:** Expected behavior — S&P doesn't trade weekends, so the blue line ends at Friday's close while BTC continues through Saturday/Sunday.
+- **NASDAQ/DJI weekend data:** Yahoo Finance returns Friday's closing price when queried on weekends. These appear in the DB with weekend timestamps but represent the last real close.
+
+---
+
+*End of QG-Master-Reference-v27.0.md*

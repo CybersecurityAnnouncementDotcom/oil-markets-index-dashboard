@@ -6,8 +6,8 @@
 
 | Field | Value |
 |---|---|
-| **Version** | 1.3 |
-| **Last Updated** | April 2026 (Thread 27) |
+| **Version** | 1.4 |
+| **Last Updated** | April 2026 (Thread 30) |
 | **Owner** | jq_007@yahoo.com |
 | **Classification** | INTERNAL ONLY |
 | **Scope** | All QG infrastructure, VPS, dashboards, auth, and deployment |
@@ -18,7 +18,7 @@
 
 ### Purpose
 
-This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 27 and all prior threads.
+This document consolidates every security measure protecting the QuantitativeGenius.com infrastructure. It is the definitive internal reference covering rate limiting, authentication, API protection, database integrity, deployment safety rules, and monitoring procedures. It reflects all measures implemented through Thread 30 and all prior threads.
 
 ### Classification
 
@@ -41,6 +41,7 @@ This document consolidates every security measure protecting the QuantitativeGen
 | Privilege escalation | `support` user has no passwordless sudo |
 | Supply chain / credential leak | No GitHub credentials stored on VPS; private repos not cloned |
 | Bitcoin data injection | BTC fetch uses HTTPS to Yahoo Finance; read-only external call (Thread 24) |
+| Zombie process on export | Dictionary-based rewrite; timeout 120 on nightly exports; kill zombie before restart |
 
 ---
 
@@ -213,7 +214,7 @@ Unauthenticated users are redirected to the paywall, not shown an error page.
 
 ### Protected API Endpoints by Dashboard
 
-**Oil Markets Index:**
+**Oil Markets Time Machine:**
 - `GET /api/current` (requireAuth)
 - `GET /api/history` (requireAuth)
 - `GET /api/sp500-history` (requireAuth)
@@ -223,7 +224,7 @@ Unauthenticated users are redirected to the paywall, not shown an error page.
 - `GET /api/user-tier` (requireAuth)
 - `POST /api/readings` (localhost-only)
 
-**World Markets Index:**
+**World Markets Time Machine:**
 - `GET /api/composite` (requireAuth)
 - `GET /api/history` (requireAuth)
 - `GET /api/country-history` (requireAuth)
@@ -241,6 +242,25 @@ Unauthenticated users are redirected to the paywall, not shown an error page.
 **Cybersecurity Threat Index:**
 - `GET /api/scores` (requireAuth)
 - `GET /api/current` (requireAuth)
+- `GET /api/export/csv` (requireAuth + requirePro)
+- `GET /api/export/json` (requireAuth + requirePro)
+- `GET /api/user-tier` (requireAuth)
+
+**Bitcoin Market Index:**
+- `GET /api/current` (requireAuth)
+- `GET /api/bitcoin-history` (requireAuth)
+- `GET /api/sp500-history` (requireAuth)
+- `GET /api/nasdaq-history` (requireAuth)
+- `GET /api/dji-history` (requireAuth)
+- `GET /api/export/csv` (requireAuth + requirePro)
+- `GET /api/export/json` (requireAuth + requirePro)
+- `GET /api/user-tier` (requireAuth)
+
+**Gold Time Machine:**
+- `GET /api/current` (requireAuth)
+- `GET /api/gold-history` (requireAuth)
+- `GET /api/component-history` (requireAuth)
+- `GET /api/bitcoin-history` (requireAuth)
 - `GET /api/export/csv` (requireAuth + requirePro)
 - `GET /api/export/json` (requireAuth + requirePro)
 - `GET /api/user-tier` (requireAuth)
@@ -394,7 +414,7 @@ The deploy-guard system prevents the three most common causes of SQLite database
 
 ### Database Tables Reference
 
-**Oil Markets Index (`oil_markets.db`):**
+**Oil Markets Time Machine (`oil_markets.db`):**
 
 | Table | Description |
 |---|---|
@@ -403,7 +423,7 @@ The deploy-guard system prevents the three most common causes of SQLite database
 | `country_data` | S&P 500 data (cross-DB from World) |
 | `bitcoin_data` | BTC price readings — Thread 24 (timestamp TEXT, price REAL) |
 
-**World Markets Index (`world_markets.db`):**
+**World Markets Time Machine (`world_markets.db`):**
 
 | Table | Description |
 |---|---|
@@ -416,6 +436,25 @@ The deploy-guard system prevents the three most common causes of SQLite database
 | Table | Description |
 |---|---|
 | `monthly_scores` | Monthly threat scores (year, month, score, level, events) |
+
+**Bitcoin Market Index (`bitcoin_markets.db`):**
+
+| Table | Description |
+|---|---|
+| `bitcoin_data` | BTC price readings (timestamp TEXT, price REAL) |
+| `nasdaq_data` | NASDAQ price readings (timestamp TEXT, price REAL) |
+| `dji_data` | DJI price readings (timestamp TEXT, price REAL) |
+
+**Gold Time Machine (`gold_markets.db`):**
+
+| Table | Description |
+|---|---|
+| `gold_data` | Gold futures (GC=F) price readings |
+| `hui_data` | Gold BUGS Index (^HUI) readings |
+| `gdx_data` | Gold Miners ETF (GDX) readings |
+| `silver_data` | Silver futures (SI=F) readings |
+| `xau_data` | Gold/Silver Sector (^XAU) readings |
+| `bitcoin_data` | BTC price readings |
 
 **Auth Server (`/opt/qg-auth/`):**
 
@@ -557,8 +596,10 @@ Only the following TCP ports are open:
 | 5000 | Dashboard 1 (internal — nginx proxy) |
 | 5001 | Dashboard 2 (internal — nginx proxy) |
 | 5002 | Dashboard 3 (internal — nginx proxy) |
+| 5003 | Dashboard 4 — Bitcoin (internal — nginx proxy) |
+| 5004 | Dashboard 5 — Gold (internal — nginx proxy) |
 
-All other ports are blocked. The dashboard ports (5000–5002) are bound to localhost and not directly accessible from the internet — they are only reachable via nginx proxy_pass.
+All other ports are blocked. The dashboard ports (5000–5004) are bound to localhost and not directly accessible from the internet — they are only reachable via nginx proxy_pass.
 
 ---
 
@@ -684,7 +725,7 @@ Run this checklist at the start of every deployment session and after every depl
 ### Pre-Deployment Checks
 
 - [ ] `crontab -l` shows ONLY the nightly export cron (`0 4 * * * /home/support/nightly-export.sh`) — no other entries
-- [ ] All 3 dashboards return **HTTP 200** on their health endpoints
+- [ ] All 5 dashboards return **HTTP 200** on their health endpoints
 - [ ] All DBs pass `PRAGMA integrity_check` (returns `ok`)
 - [ ] No deploy-guard lock files remain from previous sessions: `ls /tmp/deploy-guard-*.lock`
 - [ ] PM2 processes all show status **`online`**: `pm2 list`
@@ -693,7 +734,7 @@ Run this checklist at the start of every deployment session and after every depl
 
 ### Post-Deployment Checks
 
-- [ ] All 3 dashboards return **HTTP 200** (confirmed by deploy-done.sh output)
+- [ ] All 5 dashboards return **HTTP 200** (confirmed by deploy-done.sh output)
 - [ ] Auth server responding on port 5010 after restart
 - [ ] Rate limit headers present in API responses: `curl -I https://<dashboard>/api/... | grep X-RateLimit`
 - [ ] Export endpoints return **HTTP 403** for non-pro users (manual test or staging account)
@@ -702,7 +743,11 @@ Run this checklist at the start of every deployment session and after every depl
 - [ ] `pm2 list` shows all processes `online` with uptime increasing (not restarting in a loop)
 - [ ] SSL certificate expiry confirmed: `echo | openssl s_client -connect quantitativegenius.com:443 2>/dev/null | openssl x509 -noout -dates`
 - [ ] BTC endpoint responds: `curl -s http://localhost:5001/api/bitcoin-history?range=1H | head -c 100` (Thread 24)
-- [ ] `bitcoin_data` table exists in both oil and world DBs (Thread 24)
+- [ ] `bitcoin_data` table exists in oil, world, bitcoin, and gold DBs
+- [ ] Bitcoin dashboard HTTP 200: `curl -s -o /dev/null -w "%{http_code}" http://localhost:5003/health`
+- [ ] Gold dashboard HTTP 200: `curl -s -o /dev/null -w "%{http_code}" http://localhost:5004/health`
+- [ ] Bitcoin DB integrity: `sqlite3 /home/support/bitcoin-market-index-dashboard/data/bitcoin_markets.db "PRAGMA integrity_check;"`
+- [ ] Gold DB integrity: `sqlite3 /home/support/gold-time-machine-dashboard/data/gold_markets.db "PRAGMA integrity_check;"`
 
 ### Periodic Checks (Monthly)
 
@@ -711,7 +756,8 @@ Run this checklist at the start of every deployment session and after every depl
 - [ ] Confirm crontab has only the nightly export: `crontab -l` for `support` (should show only `0 4 * * *`) and `root` (should be empty)
 - [ ] Review PM2 logs for anomalous 403/429 spikes: `pm2 logs --lines 200`
 - [ ] Confirm swap file still active: `free -h` (Thread 24 — added to monthly checklist)
-- [ ] Confirm `bitcoin_data` tables are accumulating data in both Oil and World DBs (Thread 24)
+- [ ] Confirm `bitcoin_data` tables are accumulating data in Oil, World, Bitcoin, and Gold DBs
+- [ ] Confirm Gold DB (`gold_markets.db`) is accumulating data for all component tickers (GC=F, ^HUI, GDX, SI=F, ^XAU)
 
 ---
 
@@ -727,13 +773,17 @@ Run this checklist at the start of every deployment session and after every depl
 | nightly export log | `/home/support/nightly-export.log` |
 | Nginx rate limit config | `/etc/nginx/snippets/rate-limit.conf` |
 | Swap file | `/swapfile` (2GB, permanent via /etc/fstab) |
-| Dashboard 1 (port 5000) | `/home/support/oil-markets-index-dashboard/` |
-| Dashboard 2 (port 5001) | `/home/support/world-markets-index-dashboard/` |
+| Dashboard 1 (port 5000) | `/home/support/oil-markets-time-machine-dashboard/` |
+| Dashboard 2 (port 5001) | `/home/support/world-markets-time-machine-dashboard/` |
 | Dashboard 3 (port 5002) | `/home/support/cybersecurity-threat-index-dashboard/` |
+| Dashboard 4 (port 5003) | `/home/support/bitcoin-market-index-dashboard/` |
+| Dashboard 5 (port 5004) | `/home/support/gold-time-machine-dashboard/` |
 | Rate limiter module | `<dashboard-repo>/middleware/rate-limiter.js` |
-| Oil DB | `/home/support/oil-markets-index-dashboard/data/oil_markets.db` |
-| World DB | `/home/support/world-markets-index-dashboard/data/world_markets.db` |
+| Oil DB | `/home/support/oil-markets-time-machine-dashboard/data/oil_markets.db` |
+| World DB | `/home/support/world-markets-time-machine-dashboard/data/world_markets.db` |
 | Cyber DB | `/home/support/cybersecurity-threat-index-dashboard/data/cybersecurity.db` |
+| Bitcoin DB | `/home/support/bitcoin-market-index-dashboard/data/bitcoin_markets.db` |
+| Gold DB | `/home/support/gold-time-machine-dashboard/data/gold_markets.db` |
 
 ---
 
@@ -747,7 +797,8 @@ Run this checklist at the start of every deployment session and after every depl
 | April 8, 2026 | All 3 sites down ~7 hours (OOM crash) | e2-micro (958MB RAM) with no swap; OOM killer cascaded into full freeze; GCP auto-rebooted after ~7h | Created 2GB `/swapfile` (permanent via `/etc/fstab`) |
 | April 10, 2026 | OOM crash — load spike to 52 | Running `generate_exports.py` via screen while all 3 dashboards active; Python + Node.js exceeded RAM | Killed runaway Python; created nightly-export.sh that stops PM2 first; installed as system cron |
 | April 10, 2026 | Oil ~18% fetch failures | Oil SQLite using `delete` journal mode; concurrent reads/writes caused "database is locked" | Switched to WAL mode: `PRAGMA journal_mode=WAL` |
+| April 13, 2026 | Oil export zombie process (8+ min hang) | Correlated subquery O(N*M) in generate_exports.py — same pattern as April 10 | Killed zombie PID 485163; rewrote to dictionary-based lookups |
 
 ---
 
-*End of QG-Security-Reference-v1.3.md*
+*End of QG-Security-Reference-v1.4.md*

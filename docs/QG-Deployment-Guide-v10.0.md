@@ -8,7 +8,7 @@
 | Field | Value |
 |---|---|
 | **Last Updated** | April 2026 |
-| **Version** | 8.0 (v7.0 + Thread 26: 10x pricing, new Stripe prices/links + Thread 27: BTC independent charting fix) |
+| **Version** | 10.0 (v9.0 + Thread 30: Gold Time Machine dashboard, oil export perf fix, Bitcoin/Gold deploy procedures) |
 | **Author** | QuantitativeGenius / Perplexity Computer |
 
 ---
@@ -43,6 +43,9 @@
 15. Swap File Deployment (Thread 24)
 16. Deploy Guard Reminder
 17. Documentation Deployment
+18. Nightly Export Cron Deployment (Thread 25)
+19. BTC Independent Charting Deployment (Thread 27)
+20. Oil Export Performance Fix (Thread 30)
 
 ---
 
@@ -65,9 +68,11 @@
 | Subdomain | Service | Port | PM2 User |
 |---|---|---|---|
 | quantitativegenius.com | Landing Page (static) | N/A (Nginx serves directly) | N/A |
-| oil.quantitativegenius.com | Oil Markets Index Dashboard | 5000 | support |
-| world.quantitativegenius.com | World Markets Index Dashboard | 5001 | support |
+| oil.quantitativegenius.com | Oil Markets Time Machine Dashboard | 5000 | support |
+| world.quantitativegenius.com | World Markets Time Machine Dashboard | 5001 | support |
 | cyber.quantitativegenius.com | Cybersecurity Threat Index Dashboard | 5002 | support |
+| bitcoin.quantitativegenius.com | Bitcoin Market Index Dashboard | 5003 | support |
+| gold.quantitativegenius.com | Gold Time Machine Dashboard | 5004 | support |
 | quantitativegenius.com/paywall-gate/ | Paywall pages (static) | N/A | N/A |
 | Auth API (internal) | Authentication & Stripe | 5010 | root |
 
@@ -78,9 +83,9 @@
 | Repository | Visibility | Branch | Description |
 |---|---|---|---|
 | CybersecurityAnnouncementDotcom/qg-auth | PRIVATE | master | Auth system (magic links, Stripe webhooks, session management) |
-| CybersecurityAnnouncementDotcom/qg-deploy | PRIVATE | master | Landing page, paywall HTMLs, Nginx config |
-| CybersecurityAnnouncementDotcom/oil-markets-index-dashboard | PUBLIC | main | Oil Markets Index Dashboard |
-| CybersecurityAnnouncementDotcom/world-markets-index-dashboard | PUBLIC | main | World Markets Index Dashboard |
+| CybersecurityAnnouncementDotcom/qg-deploy | PRIVATE | master | Landing page, paywall HTMLs, Bitcoin dashboard, Gold dashboard, Nginx config |
+| CybersecurityAnnouncementDotcom/oil-markets-time-machine-dashboard | PUBLIC | main | Oil Markets Time Machine Dashboard |
+| CybersecurityAnnouncementDotcom/world-markets-time-machine-dashboard | PUBLIC | main | World Markets Time Machine Dashboard |
 | CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard | PUBLIC | main | Cybersecurity Threat Index Dashboard |
 
 ### Git Config
@@ -104,14 +109,14 @@ git config user.name "QuantitativeGenius"
     world.html                          · World paywall
 
 /home/support/
-    oil-markets-index-dashboard/        · Oil dashboard app
+    oil-markets-time-machine-dashboard/        · Oil dashboard app
         server.js
         fetch_oil.py
         public/
         data/oil_markets.db
         data/exports/                   · Pre-generated export files (VPS only)
 
-    world-markets-index-dashboard/      · World dashboard app
+    world-markets-time-machine-dashboard/      · World dashboard app
         server.js
         fetch_data.py
         public/
@@ -123,6 +128,18 @@ git config user.name "QuantitativeGenius"
         seed_data.py
         public/
         data/cybersecurity.db
+
+    bitcoin-market-index-dashboard/   · Bitcoin dashboard app
+        server.js
+        public/
+        data/bitcoin_markets.db
+        data/exports/
+
+    gold-time-machine-dashboard/       · Gold dashboard app (owned by root, chown support)
+        server.js
+        public/
+        data/gold_markets.db
+        data/exports/
 
     deploy-guard.sh                     · MANDATORY before any VPS file change
     deploy-done.sh                      · MANDATORY after any deployment
@@ -187,7 +204,7 @@ When the VPS doesn't have Git credentials set up, or a file needs to be transfer
 2. On the VPS: Use `curl` or `wget` to download from the transfer URL.
 
 ```bash
-cd /home/support/oil-markets-index-dashboard && \
+cd /home/support/oil-markets-time-machine-dashboard && \
 curl -sL "TRANSFER_URL/server.js" -o server.js && \
 pm2 delete oil-dashboard && pm2 start server.js --name oil-dashboard
 ```
@@ -207,7 +224,7 @@ For deploying multiple files at once when VPS has no git access to the repos:
 - Dashboard scripts must run as support user: `sudo -u support bash /home/support/deploy-xyz.sh`
 - Auth scripts must run as root: `sudo bash /home/support/deploy-xyz.sh`
 - Scripts should back up existing files before overwriting
-- Scripts should restart PM2 by ID (cyber=0, world=1, oil=2, auth=varies), not by name
+- Scripts should restart PM2 by ID (cyber=0, world=1, oil=2, bitcoin=3, gold=4, auth=varies), not by name
 - Scripts should verify all processes are online at the end
 
 ### Method D: Direct SSH from Perplexity Computer (Preferred · April 7, 2026+)
@@ -233,7 +250,7 @@ ssh-keygen -t ed25519 -f /home/user/.ssh/id_ed25519 -N '' -C 'computer-agent'
 
 ## 5. Deploying Individual Dashboards
 
-### Oil Markets Index Dashboard
+### Oil Markets Time Machine Dashboard
 
 ```bash
 # STEP 1: MANDATORY deploy-guard
@@ -243,7 +260,7 @@ source ~/deploy-guard.sh oil
 git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
 
 # STEP 3: Pull from GitHub
-cd /home/support/oil-markets-index-dashboard
+cd /home/support/oil-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- server.js public/index.html
 
@@ -270,7 +287,7 @@ pm2 start server.js --name oil-dashboard
 pm2 save
 ```
 
-### World Markets Index Dashboard
+### World Markets Time Machine Dashboard
 
 ```bash
 # STEP 1: MANDATORY deploy-guard
@@ -280,7 +297,7 @@ source ~/deploy-guard.sh world
 git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
 
 # STEP 3: Pull from GitHub
-cd /home/support/world-markets-index-dashboard
+cd /home/support/world-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- server.js public/index.html generate_exports.py
 
@@ -330,6 +347,79 @@ source ~/deploy-done.sh cyber
 - `data/cybersecurity.db` · SQLite database (DO NOT delete)
 
 Note: Daily 6AM cron for cyber data refresh is currently PAUSED.
+
+### Bitcoin Market Index Dashboard (Thread 28)
+
+The Bitcoin dashboard lives in the `qg-deploy` repo (private), subdirectory `bitcoin-market-index-dashboard/`.
+
+```bash
+# STEP 1: deploy-guard does NOT support 'bitcoin' yet — manually stop PM2
+pm2 stop bitcoin
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Pull from GitHub
+cd /home/support/bitcoin-market-index-dashboard
+# NOTE: This directory is NOT a git repo on VPS — files are deployed via SCP or
+# cloned fresh from qg-deploy/bitcoin-market-index-dashboard/
+# To update:
+scp -o StrictHostKeyChecking=no <local-file> support@136.117.206.145:/home/support/bitcoin-market-index-dashboard/<path>
+
+# STEP 4: Validate
+grep -c 'pctDualAxis' public/index.html  # Should be 5+
+grep -c 'fetchYahooPrice' server.js       # Should be 3+
+
+# STEP 5: Restart PM2
+pm2 restart bitcoin
+pm2 status
+```
+
+**Key files:**
+- `server.js` · Express server, BTC/NASDAQ/DJI fetching, S&P from World DB (read-only), auth middleware, export endpoints
+- `public/index.html` · Frontend dashboard with stock toggles, dual-axis % mode, Pro export UI
+- `data/bitcoin_markets.db` · SQLite database (bitcoin_data, nasdaq_data, dji_data)
+- `rate-limiter.js` · In-memory rate limiting module
+
+**PM2 process:** `bitcoin` (ID 3) on port 5003.
+
+**Note:** deploy-guard.sh and deploy-done.sh do not yet support the `bitcoin` argument. Manual PM2 stop/restart is required until those scripts are updated.
+
+### Gold Time Machine Dashboard (Thread 30)
+
+The Gold dashboard lives in the `qg-deploy` repo (private), subdirectory `gold-time-machine-dashboard/`.
+
+```bash
+# STEP 1: deploy-guard does NOT support 'gold' yet — manually stop PM2
+pm2 stop gold
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Deploy via SCP (gold files owned by root)
+# From Perplexity Computer sandbox or local:
+scp -o StrictHostKeyChecking=no <local-file> root@136.117.206.145:/home/support/gold-time-machine-dashboard/<path>
+# Then fix ownership:
+ssh root@136.117.206.145 'chown -R support:support /home/support/gold-time-machine-dashboard/'
+
+# STEP 4: Validate
+grep -c 'gtm_composite' public/index.html  # Should be present
+grep -c 'fetchYahooPrice' server.js         # Should be present
+
+# STEP 5: Restart PM2
+pm2 restart gold
+pm2 status
+```
+
+**Key files:**
+- `server.js` · Express server, GC=F/^HUI/GDX/SI=F/^XAU fetching, BTC fetch, auth middleware, export endpoints
+- `public/index.html` · Frontend dashboard with component toggles, GTM composite chart, Pro export UI
+- `data/gold_markets.db` · SQLite database
+- `generate_exports.py` · Daily export generator
+
+**PM2 process:** `gold` (ID 4) on port 5004.
+
+**Note:** Gold files on VPS are owned by root. Must use `scp root@...` then `chown support:support`. deploy-guard.sh and deploy-done.sh do not yet support the `gold` argument.
 
 ---
 
@@ -407,13 +497,15 @@ pm2 save                 # Save current process list
 pm2 startup              # Set PM2 to start on boot
 ```
 
-### Current PM2 Process Names & IDs (as of Thread 25 cleanup, April 10, 2026)
+### Current PM2 Process Names & IDs (as of Thread 30, April 2026)
 
 | PM2 Name | PM2 ID | Port | User |
 |---|---|---|---|
-| cyber-dashboard | 0 | 5002 | support |
-| world-dashboard | 1 | 5001 | support |
-| oil-dashboard | 2 | 5000 | support |
+| cyber | 0 | 5002 | support |
+| world | 1 | 5001 | support |
+| oil | 2 | 5000 | support |
+| bitcoin | 3 | 5003 | support |
+| gold | 4 | 5004 | support |
 | (export crons removed) | — | — | See Section 18 |
 | qg-auth | varies | 5010 | root |
 
@@ -545,16 +637,16 @@ Root cause: Pulling updated code and restarting PM2 only fixes new data points g
 
 ```bash
 # 1. Fetch latest code (NEVER use git pull)
-cd /home/support/oil-markets-index-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
-cd /home/support/world-markets-index-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
+cd /home/support/oil-markets-time-machine-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
+cd /home/support/world-markets-time-machine-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
 
 # 2. Stop dashboards so backfill has exclusive DB access
 pm2 stop oil-dashboard
 pm2 stop world-dashboard
 
 # 3. Re-run backfills (oil requires --force flag, world auto-clears)
-cd /home/support/oil-markets-index-dashboard && python3 backfill.py --force
-cd /home/support/world-markets-index-dashboard && python3 backfill.py
+cd /home/support/oil-markets-time-machine-dashboard && python3 backfill.py --force
+cd /home/support/world-markets-time-machine-dashboard && python3 backfill.py
 
 # 4. Restart dashboards
 pm2 restart oil-dashboard
@@ -668,7 +760,7 @@ BTC data accumulates from the first deploy forward. There is no historical backf
 
 # STEP 2: Deploy World dashboard
 source ~/deploy-guard.sh world
-cd /home/support/world-markets-index-dashboard
+cd /home/support/world-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- server.js public/index.html
 # Validate BTC endpoint present:
@@ -678,7 +770,7 @@ source ~/deploy-done.sh world
 
 # STEP 3: Deploy Oil dashboard
 source ~/deploy-guard.sh oil
-cd /home/support/oil-markets-index-dashboard
+cd /home/support/oil-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- server.js public/index.html
 # Validate BTC endpoint present:
@@ -687,8 +779,8 @@ grep -c 'bitcoin' public/index.html
 source ~/deploy-done.sh oil
 
 # STEP 4: Verify bitcoin_data table exists after restart
-sqlite3 /home/support/world-markets-index-dashboard/data/world_markets.db ".tables"
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db ".tables"
+sqlite3 /home/support/world-markets-time-machine-dashboard/data/world_markets.db ".tables"
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db ".tables"
 # Expected: bitcoin_data should appear in both
 ```
 
@@ -700,9 +792,9 @@ curl -s http://localhost:5001/api/bitcoin-history?range=1H | head -c 200
 curl -s http://localhost:5000/api/bitcoin-history?range=1H | head -c 200
 
 # Check BTC data is accumulating (wait 60+ seconds after deploy)
-sqlite3 /home/support/world-markets-index-dashboard/data/world_markets.db \
+sqlite3 /home/support/world-markets-time-machine-dashboard/data/world_markets.db \
   "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM bitcoin_data;"
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db \
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db \
   "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM bitcoin_data;"
 ```
 
@@ -835,18 +927,19 @@ GitHub is the single source of truth for all documentation. The VPS always pulls
 
 Each dashboard repo has a `docs/` directory containing:
 - The dashboard's methodology PDF (e.g., `Oil_Market_Index_Methodology_v4.0.pdf`)
-- `QG-Master-Reference-v25.0.md`
-- `QG-Deployment-Guide-v7.0.md` (this document)
-- `QG-Security-Reference-v1.2.md`
+- `QG-Master-Reference-v28.0.md`
+- `QG-Deployment-Guide-v10.0.md` (this document)
+- `QG-Security-Reference-v1.4.md`
+- `QG-Account-Recovery-Guide.md`
 
-The three QG reference docs are duplicated across all three repos so each project is self-contained.
+The QG reference docs are duplicated across all dashboard repos so each project is self-contained. The `qg-deploy` repo (Bitcoin + Gold + shared pages) also contains a copy in its `docs/` directory.
 
 ### Updating Documentation
 
 ```bash
 # 1. Update docs in the workspace, push to GitHub
 # Example: updated Oil methodology
-cd oil-markets-index-dashboard
+cd oil-markets-time-machine-dashboard
 cp updated_doc.pdf docs/
 git add docs/
 git commit -m "docs: update Oil methodology to v4.1"
@@ -873,8 +966,8 @@ When a shared QG reference doc changes, deploy to all three dashboards:
 ```bash
 for dash in oil world cyber; do
   cd /home/support/$(case $dash in
-    oil) echo oil-markets-index-dashboard;;
-    world) echo world-markets-index-dashboard;;
+    oil) echo oil-markets-time-machine-dashboard;;
+    world) echo world-markets-time-machine-dashboard;;
     cyber) echo cybersecurity-threat-index-dashboard;;
   esac)
   source ~/deploy-guard.sh $dash
@@ -893,52 +986,16 @@ done
 
 ---
 
-## Appendix: % Change Toggle Deployment (Thread 22 · April 8, 2026)
-
-### Files Changed
-
-- **Oil Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, single shared Y-axis (removed dual axis per user request)
-- **World Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, all three lines normalize to % change
-
-### Key Commits
-
-| Repo | Commit | Description |
-|---|---|---|
-| world-markets-index-dashboard | dae358a | % Change toggle on World dashboard |
-| oil-markets-index-dashboard | 68b0529 | Single shared Y-axis (removed dual axis) + % Change toggle |
-
----
-
-## Appendix: Oil Export Consolidation Deployment (Thread 23 · April 9, 2026)
-
-### What Was Deployed
-
-Added `generate_exports.py` to Oil dashboard, matching the World pattern. Oil CSV was dumping every intraday row (~850/day); now consolidated to 1 row/day.
-
-### Files Changed
-
-- **Oil Dashboard:** `server.js` · Updated export endpoints with `tryServeFile()` + `GROUP BY date`
-- **Oil Dashboard:** `generate_exports.py` · New file (copied and adapted from World)
-- **Oil Dashboard:** `ecosystem.config.js` · Added `oil-export-cron` PM2 cron at 23:55 UTC
-
-### Key Commits
-
-| Repo | Commit | Description |
-|---|---|---|
-| oil-markets-index-dashboard | 30685e3 | generate_exports.py + export consolidation |
-
----
-
 ## 18. Nightly Export Cron Deployment (Thread 25 · April 10, 2026)
 
 ### What Was Deployed
 
-Replaced the unreliable PM2-based export crons with a system crontab that safely stops dashboards before running exports.
+Replaced the unreliable PM2-based export crons with a system crontab that safely stops dashboards before running exports. The nightly export now includes Oil, World, Bitcoin, and Gold with `timeout 120` applied to each export run.
 
 ### Problem
 
 The old `oil-export-cron` and `world-export-cron` PM2 processes had two fatal flaws:
-1. **PM2 `cron_restart` doesn’t fire for stopped processes.** Both had drifted to "stopped" state after their one-time run, so PM2 never re-triggered them.
+1. **PM2 `cron_restart` doesn't fire for stopped processes.** Both had drifted to "stopped" state after their one-time run, so PM2 never re-triggered them.
 2. **Running `generate_exports.py` while dashboards are active causes OOM.** On April 10, running exports via screen while all 3 dashboards were active spiked load to 52 and crashed the server.
 
 ### Solution
@@ -950,10 +1007,10 @@ The old `oil-export-cron` and `world-export-cron` PM2 processes had two fatal fl
 
 ### Also Deployed: WAL Mode on Oil
 
-Oil’s SQLite was using `delete` journal mode (the legacy default), causing ~18% of fetch attempts to fail with "database is locked". Fixed with:
+Oil's SQLite was using `delete` journal mode (the legacy default), causing ~18% of fetch attempts to fail with "database is locked". Fixed with:
 
 ```sql
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
 ```
 
 ### Verification
@@ -963,12 +1020,12 @@ sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA jo
 crontab -l
 # Expected: 0 4 * * * /home/support/nightly-export.sh
 
-# PM2 clean (3 processes only)
+# PM2 clean (5 dashboard processes)
 pm2 list
-# Expected: cyber(0), world(1), oil(2) — no export crons
+# Expected: cyber(0), world(1), oil(2), bitcoin(3), gold(4) — no export crons
 
 # WAL mode confirmed
-sqlite3 /home/support/oil-markets-index-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
 # Expected: wal
 
 # Check export log after first run
@@ -1004,14 +1061,14 @@ BTC trades 24/7 but was previously mapped only onto main index timestamps. When 
 
 # STEP 2: Deploy Oil dashboard
 source ~/deploy-guard.sh oil
-cd /home/support/oil-markets-index-dashboard
+cd /home/support/oil-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- public/index.html
 source ~/deploy-done.sh oil
 
 # STEP 3: Deploy World dashboard
 source ~/deploy-guard.sh world
-cd /home/support/world-markets-index-dashboard
+cd /home/support/world-markets-time-machine-dashboard
 git fetch origin main
 git checkout origin/main -- public/index.html
 source ~/deploy-done.sh world
@@ -1019,4 +1076,84 @@ source ~/deploy-done.sh world
 
 ---
 
-*End of QG-Deployment-Guide-v8.0.md*
+## 20. Oil Export Performance Fix (Thread 30 · April 13, 2026)
+
+### Problem
+
+Oil's `generate_exports.py` used a correlated subquery in `get_daily_close_readings()` that was O(N*M) — for each of 6,495 rows, it ran a subquery against the full table. On the memory-constrained e2-micro VPS, this caused the Python process to hang at 90% CPU for 8+ minutes without producing output. This was the same pattern as Known Issue #17 (April 10, 2026).
+
+The user correctly identified this was a repeat of the earlier incident: "you just did the same thing earlier tonight."
+
+### Root Cause
+
+```sql
+-- SLOW (O(N*M) correlated subquery)
+SELECT * FROM readings r1 
+WHERE r1.timestamp = (
+  SELECT MAX(r2.timestamp) FROM readings r2 
+  WHERE date(r2.timestamp) = date(r1.timestamp)
+)
+```
+
+### Fix
+
+Rewrote to dictionary-based lookups matching the Bitcoin/Gold approach:
+
+```python
+# FAST (O(N) dictionary-based)
+daily_close = {}
+for row in all_readings:
+    date_key = row['timestamp'][:10]
+    daily_close[date_key] = row  # Last reading per date wins
+```
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| qg-deploy | ec5df73 | Oil export dictionary-based rewrite |
+| oil-markets-time-machine-dashboard | 9f9b203 | Same fix pushed to public repo |
+
+### Lesson
+
+**Rule: NEVER use correlated subqueries on e2-micro.** Always use dictionary-based or hash-join patterns for any grouping/windowing operation. The VPS has only 958MB RAM + 2GB swap — memory-intensive SQL patterns will OOM or zombie.
+
+---
+
+## Appendix: % Change Toggle Deployment (Thread 22 · April 8, 2026)
+
+### Files Changed
+
+- **Oil Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, single shared Y-axis (removed dual axis per user request)
+- **World Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, all three lines normalize to % change
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| world-markets-time-machine-dashboard | dae358a | % Change toggle on World dashboard |
+| oil-markets-time-machine-dashboard | 68b0529 | Single shared Y-axis (removed dual axis) + % Change toggle |
+
+---
+
+## Appendix: Oil Export Consolidation Deployment (Thread 23 · April 9, 2026)
+
+### What Was Deployed
+
+Added `generate_exports.py` to Oil dashboard, matching the World pattern. Oil CSV was dumping every intraday row (~850/day); now consolidated to 1 row/day.
+
+### Files Changed
+
+- **Oil Dashboard:** `server.js` · Updated export endpoints with `tryServeFile()` + `GROUP BY date`
+- **Oil Dashboard:** `generate_exports.py` · New file (copied and adapted from World)
+- **Oil Dashboard:** `ecosystem.config.js` · Added `oil-export-cron` PM2 cron at 23:55 UTC
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| oil-markets-time-machine-dashboard | 30685e3 | generate_exports.py + export consolidation |
+
+---
+
+*End of QG-Deployment-Guide-v10.0.md*
