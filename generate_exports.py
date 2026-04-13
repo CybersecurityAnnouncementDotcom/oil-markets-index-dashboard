@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Daily Export Generator for Oil Markets Index Pro subscribers.
+Fast Export Generator for Oil Markets Index Pro subscribers.
 Reads from SQLite DB and writes CSV/JSON files to data/exports/.
 
-Run via PM2 cron or manually:
+Run via nightly-export.sh cron or manually:
   python3 generate_exports.py
 
 Generates:
@@ -15,13 +15,19 @@ Generates:
   data/exports/oil-markets-history.json
 
 NOTE: Data starts from 2000-08-23 (earliest WTI data from Yahoo Finance CL=F).
+
+Performance: Uses dictionary-based lookups instead of correlated subqueries.
+Previous version used a correlated subquery (SELECT ... FROM bitcoin_data WHERE
+date(bd.timestamp) = date(r.timestamp)) inside the main GROUP BY query, causing
+O(N*M) full table scans that hung the e2-micro VPS at 90%+ CPU for 8+ minutes.
+The fix pre-builds a date->price dictionary for bitcoin_data, then does O(1)
+lookups per row. This matches the approach used by Bitcoin and Gold export scripts.
 """
 
 import sqlite3
 import json
 import csv
-import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 # Paths
@@ -36,33 +42,13 @@ DATA_START_DATE = "2000-08-23"
 # Ensure export directories exist
 DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
+CSV_FIELDS = ["date", "index_value", "wti_price", "brent_price", "bitcoin_price"]
+
 
 def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def get_daily_close_readings(conn):
-    """Get one reading per calendar day (the last reading of each day).
-    Uses the last reading's values as the daily 'close'.
-    Includes bitcoin_price via LEFT JOIN on bitcoin_data.
-    Starts from DATA_START_DATE (2000-08-23) when WTI data begins."""
-    rows = conn.execute("""
-        SELECT date(r.timestamp) as date,
-               MAX(r.timestamp) as timestamp,
-               r.value as index_value,
-               r.wti_price,
-               r.brent_price,
-               (SELECT bd.price FROM bitcoin_data bd
-                WHERE date(bd.timestamp) = date(r.timestamp)
-                ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
-        FROM readings r
-        WHERE date(r.timestamp) >= ?
-        GROUP BY date(r.timestamp)
-        ORDER BY date ASC
-    """, (DATA_START_DATE,)).fetchall()
-    return [dict(r) for r in rows]
 
 
 def write_csv(filepath, rows, fieldnames):
@@ -79,134 +65,8 @@ def write_json(filepath, data):
     print(f"  Written: {filepath}")
 
 
-CSV_FIELDS = ["date", "index_value", "wti_price", "brent_price", "bitcoin_price"]
-
-
-def generate_daily_snapshot(conn, date_str=None):
-    """Generate CSV/JSON for a specific date (defaults to today)."""
-    if date_str is None:
-        date_str = datetime.utcnow().strftime("%Y-%m-%d")
-
-    # Get the last reading for this date (with bitcoin price)
-    reading = conn.execute("""
-        SELECT MAX(r.timestamp) as timestamp,
-               r.value as index_value,
-               r.wti_price,
-               r.brent_price,
-               (SELECT bd.price FROM bitcoin_data bd
-                WHERE date(bd.timestamp) = ?
-                ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
-        FROM readings r WHERE date(r.timestamp) = ?
-    """, (date_str, date_str)).fetchone()
-
-    if not reading or reading["index_value"] is None:
-        print(f"  No data for {date_str}, skipping daily snapshot")
-        return
-
-    row = {
-        "date": date_str,
-        "index_value": round(reading["index_value"], 2),
-        "wti_price": round(reading["wti_price"], 2) if reading["wti_price"] else "",
-        "brent_price": round(reading["brent_price"], 2) if reading["brent_price"] else "",
-        "bitcoin_price": round(reading["bitcoin_price"], 2) if reading["bitcoin_price"] else "",
-    }
-
-    # Daily CSV — one row
-    csv_path = DAILY_DIR / f"{date_str}.csv"
-    write_csv(csv_path, [row], CSV_FIELDS)
-
-    # Daily JSON
-    json_data = {
-        "date": date_str,
-        "timestamp": reading["timestamp"],
-        "index_value": round(reading["index_value"], 2),
-        "wti_price": round(reading["wti_price"], 2) if reading["wti_price"] else None,
-        "brent_price": round(reading["brent_price"], 2) if reading["brent_price"] else None,
-        "bitcoin_price": round(reading["bitcoin_price"], 2) if reading["bitcoin_price"] else None,
-    }
-    json_path = DAILY_DIR / f"{date_str}.json"
-    write_json(json_path, json_data)
-
-    return json_data
-
-
-def generate_latest(conn):
-    """Generate latest.csv and latest.json (always current day)."""
-    readings = get_daily_close_readings(conn)
-    if not readings:
-        print("  No readings found")
-        return
-
-    latest = readings[-1]
-    row = {
-        "date": latest["date"],
-        "index_value": round(latest["index_value"], 2),
-        "wti_price": round(latest["wti_price"], 2) if latest["wti_price"] else "",
-        "brent_price": round(latest["brent_price"], 2) if latest["brent_price"] else "",
-        "bitcoin_price": round(latest["bitcoin_price"], 2) if latest.get("bitcoin_price") else "",
-    }
-
-    write_csv(
-        EXPORT_DIR / "oil-markets-latest.csv",
-        [row],
-        CSV_FIELDS,
-    )
-
-    write_json(EXPORT_DIR / "oil-markets-latest.json", {
-        "export_date": datetime.utcnow().isoformat(),
-        "date": latest["date"],
-        "timestamp": latest["timestamp"],
-        "index_value": round(latest["index_value"], 2),
-        "wti_price": round(latest["wti_price"], 2) if latest["wti_price"] else None,
-        "brent_price": round(latest["brent_price"], 2) if latest["brent_price"] else None,
-        "bitcoin_price": round(latest["bitcoin_price"], 2) if latest.get("bitcoin_price") else None,
-    })
-
-
-def generate_history(conn):
-    """Generate full history CSV/JSON — one row per calendar day.
-    Starts from 2000-08-23 (WTI data start)."""
-    readings = get_daily_close_readings(conn)
-
-    # Build rows for CSV
-    csv_rows = []
-    for r in readings:
-        csv_rows.append({
-            "date": r["date"],
-            "index_value": round(r["index_value"], 2),
-            "wti_price": round(r["wti_price"], 2) if r["wti_price"] else "",
-            "brent_price": round(r["brent_price"], 2) if r["brent_price"] else "",
-            "bitcoin_price": round(r["bitcoin_price"], 2) if r.get("bitcoin_price") else "",
-        })
-
-    # History CSV
-    write_csv(
-        EXPORT_DIR / "oil-markets-history.csv",
-        csv_rows,
-        CSV_FIELDS,
-    )
-
-    # History JSON
-    json_data = []
-    for r in readings:
-        json_data.append({
-            "date": r["date"],
-            "timestamp": r["timestamp"],
-            "index_value": round(r["index_value"], 2),
-            "wti_price": round(r["wti_price"], 2) if r["wti_price"] else None,
-            "brent_price": round(r["brent_price"], 2) if r["brent_price"] else None,
-            "bitcoin_price": round(r["bitcoin_price"], 2) if r.get("bitcoin_price") else None,
-        })
-
-    write_json(EXPORT_DIR / "oil-markets-history.json", {
-        "export_date": datetime.utcnow().isoformat(),
-        "record_count": len(json_data),
-        "data": json_data,
-    })
-
-
 def main():
-    print(f"[{datetime.utcnow().isoformat()}] Generating Oil Markets Index exports...")
+    print(f"[{datetime.utcnow().isoformat()}] Generating Oil Markets Index exports (fast mode)...")
     print(f"  DB: {DB_PATH}")
     print(f"  Export dir: {EXPORT_DIR}")
     print(f"  Data start date: {DATA_START_DATE}")
@@ -214,26 +74,96 @@ def main():
 
     conn = get_db()
 
-    try:
-        # 1. Today's daily snapshot
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        print(f"1. Daily snapshot for {today}:")
-        generate_daily_snapshot(conn, today)
-        print()
+    # Step 1: Build bitcoin price lookup dictionary (fast, one query)
+    btc_map = {}
+    for r in conn.execute("""
+        SELECT date(timestamp) as d, price
+        FROM bitcoin_data
+        WHERE timestamp IN (
+            SELECT MAX(timestamp) FROM bitcoin_data GROUP BY date(timestamp)
+        )
+    """).fetchall():
+        btc_map[r['d']] = r['price']
+    print(f"  Bitcoin: {len(btc_map)} daily prices loaded")
 
-        # 2. Latest files
-        print("2. Latest files:")
-        generate_latest(conn)
-        print()
+    # Step 2: Get one reading per calendar day from readings table (no correlated subquery)
+    rows = conn.execute("""
+        SELECT date(timestamp) as date,
+               MAX(timestamp) as timestamp,
+               value as index_value,
+               wti_price,
+               brent_price
+        FROM readings
+        WHERE date(timestamp) >= ?
+        GROUP BY date(timestamp)
+        ORDER BY date ASC
+    """, (DATA_START_DATE,)).fetchall()
+    print(f"  Readings: {len(rows)} daily rows (from {DATA_START_DATE})")
+    print()
 
-        # 3. Full history
-        print("3. Full history:")
-        generate_history(conn)
-        print()
+    # Step 3: Build combined rows using O(1) dictionary lookup for BTC
+    csv_rows = []
+    json_data = []
 
-        print("Export generation complete.")
-    finally:
-        conn.close()
+    for r in rows:
+        d = r['date']
+        btc_price = btc_map.get(d)
+
+        row = {
+            "date": d,
+            "index_value": round(r["index_value"], 2),
+            "wti_price": round(r["wti_price"], 2) if r["wti_price"] else "",
+            "brent_price": round(r["brent_price"], 2) if r["brent_price"] else "",
+            "bitcoin_price": round(btc_price, 2) if btc_price else "",
+        }
+        csv_rows.append(row)
+        json_data.append({
+            "date": d,
+            "timestamp": r["timestamp"],
+            "index_value": round(r["index_value"], 2),
+            "wti_price": round(r["wti_price"], 2) if r["wti_price"] else None,
+            "brent_price": round(r["brent_price"], 2) if r["brent_price"] else None,
+            "bitcoin_price": round(btc_price, 2) if btc_price else None,
+        })
+
+    # Step 4: Write history files
+    print("1. Full history:")
+    write_csv(EXPORT_DIR / "oil-markets-history.csv", csv_rows, CSV_FIELDS)
+    write_json(EXPORT_DIR / "oil-markets-history.json", {
+        "export_date": datetime.utcnow().isoformat(),
+        "record_count": len(json_data),
+        "data": json_data,
+    })
+    print()
+
+    # Step 5: Write latest files
+    print("2. Latest files:")
+    if csv_rows:
+        latest_csv = csv_rows[-1]
+        latest_json = json_data[-1]
+        write_csv(EXPORT_DIR / "oil-markets-latest.csv", [latest_csv], CSV_FIELDS)
+        write_json(EXPORT_DIR / "oil-markets-latest.json", {
+            "export_date": datetime.utcnow().isoformat(),
+            **latest_json,
+        })
+    else:
+        print("  No readings found")
+    print()
+
+    # Step 6: Write daily snapshot
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    print(f"3. Daily snapshot for {today}:")
+    today_rows = [r for r in csv_rows if r["date"] == today]
+    today_json = [j for j in json_data if j["date"] == today]
+    if today_rows:
+        write_csv(DAILY_DIR / f"{today}.csv", today_rows, CSV_FIELDS)
+        write_json(DAILY_DIR / f"{today}.json", today_json[-1])
+    else:
+        print(f"  No data for {today}, skipping daily snapshot")
+    print()
+
+    conn.close()
+    print("Export generation complete.")
 
 
 if __name__ == "__main__":
