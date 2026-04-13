@@ -13,6 +13,8 @@ Generates:
   data/exports/oil-markets-latest.json
   data/exports/oil-markets-history.csv
   data/exports/oil-markets-history.json
+
+NOTE: Data starts from 2000-08-23 (earliest WTI data from Yahoo Finance CL=F).
 """
 
 import sqlite3
@@ -28,6 +30,9 @@ DB_PATH = SCRIPT_DIR / "data" / "oil_markets.db"
 EXPORT_DIR = SCRIPT_DIR / "data" / "exports"
 DAILY_DIR = EXPORT_DIR / "daily"
 
+# Data start date: earliest WTI data from Yahoo Finance CL=F
+DATA_START_DATE = "2000-08-23"
+
 # Ensure export directories exist
 DAILY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -41,7 +46,8 @@ def get_db():
 def get_daily_close_readings(conn):
     """Get one reading per calendar day (the last reading of each day).
     Uses the last reading's values as the daily 'close'.
-    Includes bitcoin_price via LEFT JOIN on bitcoin_data."""
+    Includes bitcoin_price via LEFT JOIN on bitcoin_data.
+    Starts from DATA_START_DATE (2000-08-23) when WTI data begins."""
     rows = conn.execute("""
         SELECT date(r.timestamp) as date,
                MAX(r.timestamp) as timestamp,
@@ -52,9 +58,10 @@ def get_daily_close_readings(conn):
                 WHERE date(bd.timestamp) = date(r.timestamp)
                 ORDER BY bd.timestamp DESC LIMIT 1) as bitcoin_price
         FROM readings r
+        WHERE date(r.timestamp) >= ?
         GROUP BY date(r.timestamp)
         ORDER BY date ASC
-    """).fetchall()
+    """, (DATA_START_DATE,)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -157,7 +164,8 @@ def generate_latest(conn):
 
 
 def generate_history(conn):
-    """Generate full history CSV/JSON — one row per calendar day."""
+    """Generate full history CSV/JSON — one row per calendar day.
+    Starts from 2000-08-23 (WTI data start)."""
     readings = get_daily_close_readings(conn)
 
     # Build rows for CSV
@@ -201,6 +209,7 @@ def main():
     print(f"[{datetime.utcnow().isoformat()}] Generating Oil Markets Index exports...")
     print(f"  DB: {DB_PATH}")
     print(f"  Export dir: {EXPORT_DIR}")
+    print(f"  Data start date: {DATA_START_DATE}")
     print()
 
     conn = get_db()
