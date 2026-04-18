@@ -316,7 +316,7 @@
 ### Common Dashboard Settings
 
 - **Footer:** "Sponsored by QuantitativeGenius.com"
-- **Disclaimer:** "This research publication is not intended to be investment advice and is not from a Registered Investment Advisor."
+- **Disclaimer:** "This research publication is not investment advice and is not from a Registered Investment Advisor."
 - **Time format:** UTC / PDT / Stanford University Time
 - **No "Live" label** · never use the word "Live" anywhere
 
