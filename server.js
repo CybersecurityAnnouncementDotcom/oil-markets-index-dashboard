@@ -629,6 +629,6 @@ app.get('/api/auth/api-key-status', authLimiter, proxyToAuth('GET'));
 app.post('/api/auth/api-key', authLimiter, proxyToAuth('POST'));
 app.delete('/api/auth/api-key', authLimiter, proxyToAuth('DELETE'));
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`Oil Markets Index Dashboard running on http://localhost:${PORT}`);
 });
