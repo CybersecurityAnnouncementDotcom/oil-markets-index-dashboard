@@ -1,0 +1,1306 @@
+<!-- MANDATORY: This filename MUST include the version number (e.g., QG-Deployment-Guide-v4.9.md). -->
+
+## v11.2 — 2026-04-23 (changelog)
+
+**Phase 2 email migration + VPS IP correction:**
+- Corrected VPS IP throughout: `136.117.206.145` → **`35.233.231.75`**. The old IP was Wix shared infra, not our VPS (see QG-Parking-Lot §E4).
+- Added geniusmarketresearch.com nginx vhost (301 redirect to `quantitativegenius.com/meetings-checkout.html`). Source in `hofcards/nginx/geniusmarketresearch.com.conf`; deploy script `hofcards/scripts/deploy-gmr-redirect-root.sh`.
+- **qg-auth ownership correction:** `qg-auth` runs under the **support** user's PM2 daemon (id=15), NOT root PM2. Restart is `pm2 restart qg-auth --update-env` as support in Google Cloud SSH-in-browser. `sudo pm2 restart qg-auth` will error with 'Process or Namespace qg-auth not found'.
+- Magic-link reply_to fallback in `qg-auth/magic-link.js:189` changed to `support@geniusmarketresearch.com`. POKEMON_EMAIL_WHITELIST in `auth-middleware.js` now includes both addresses (commit `qg-auth/master@409b566`).
+
+**Older versions preserved:** v11.1, v11.0, v10.1, v10.0, v8.0 remain in `docs/` as historical record.
+
+---
+<!-- When bumping the version, RENAME this file to the new version. NEVER use a plain filename without version. -->
+<!-- SAFETY: Always use `git fetch origin main` + `git checkout origin/main -- <file>` on VPS. NEVER use `git pull` or `git checkout main`. -->
+<!-- SAFETY: Pre-generated export files in data/exports/ are served BEFORE live DB queries. Update generate_exports.py AND regenerate when changing export logic. -->
+
+# QuantitativeGenius.com · Deployment Guide
+
+| Field | Value |
+|---|---|
+| **Last Updated** | April 21, 2026 |
+| **Version** | 11.2 (v11.0 + Thread 33: Auto Market Index v2.0 references — Methodology v2.0 + Basket v1.0 live in `docs/`, port 5006 / PM2 `auto-dashboard` confirmed, AMD/AMI internal naming documented) |
+| **Author** | QuantitativeGenius / Perplexity Computer |
+| **Project Family** | QG (also covers HOF site deploys) — see Multi-Project-Index-v1.0.md |
+
+---
+
+## ·· STOP · READ BEFORE ANY VPS WORK ··
+
+0. **GITHUB-FIRST IS POLICY (v11.0).** Every change MUST land in GitHub master FIRST. Then deploy to VPS by pulling from GitHub. NO direct VPS edits. NO exceptions. (Per repeated user directive.)
+1. Run `source ~/deploy-guard.sh <world|oil|cyber|stocks|auto|baseball|basketball|football|hockey|soccer|pokemon|hof>` **BEFORE** touching any file on VPS. No exceptions.
+2. **NEVER** `git reset --hard` while PM2 is running. It corrupts SQLite databases.
+3. **NEVER** `sed`, `python3 -c`, or direct-patch files on VPS. Push to GitHub first, then `git fetch` + `git checkout origin/main -- <file>`.
+4. **NEVER** `git pull`. Use `git fetch origin main` + `git checkout origin/main -- <file>`.
+5. Run `source ~/deploy-done.sh <project>` **AFTER** deployment. It restarts PM2 and verifies integrity.
+6. **VERSIONED DOCS:** When shipping a new version (e.g., v30.0 replacing v29.0), the same commit must DELETE the old version file. Never leave stale versioned docs in either GitHub or VPS.
+7. If you skip these steps, you will corrupt a database. It has happened on April 6, April 7, and April 8, 2026.
+
+---
+
+## Table of Contents
+
+1. Infrastructure Overview
+2. GitHub Repositories
+3. VPS Directory Structure
+4. Regular Deployment Process
+5. Deploying Individual Dashboards
+6. Deploying the Landing Page
+7. Deploying the Auth System
+8. Deploying Paywall Pages
+9. PM2 Process Management
+10. Nginx Configuration
+11. SSL Certificate Renewal
+12. Troubleshooting
+13. API Key System Deployment (April 7, 2026)
+14. Bitcoin Overlay Deployment (Thread 24)
+15. Swap File Deployment (Thread 24)
+16. Deploy Guard Reminder
+17. Documentation Deployment
+18. Nightly Export Cron Deployment (Thread 25)
+19. BTC Independent Charting Deployment (Thread 27)
+20. Oil Export Performance Fix (Thread 30)
+
+---
+
+## 1. Infrastructure Overview
+
+| Component | Detail |
+|---|---|
+| VPS IP | 35.233.231.75 |
+| Domain | quantitativegenius.com (DNS via NameBright) |
+| SSL | Let's Encrypt wildcard, expires July 1, 2026 |
+| OS | Linux (Google Cloud VPS, e2-micro) |
+| RAM | ~958MB physical + 2GB swap (added April 8, 2026) |
+| Web Server | Nginx |
+| Process Manager | PM2 |
+| Runtime | Node.js |
+| Email | service@quantitativegenius.com via Resend API (replies forward to support@quantitativegenius.com) |
+
+### Subdomains & Port Mapping
+
+| Subdomain | Service | Port | PM2 User |
+|---|---|---|---|
+| quantitativegenius.com | Landing Page (static) | N/A (Nginx serves directly) | N/A |
+| oil.quantitativegenius.com | Oil Markets Time Machine Dashboard | 5000 | support |
+| world.quantitativegenius.com | World Markets Time Machine Dashboard | 5001 | support |
+| cyber.quantitativegenius.com | Cybersecurity Threat Index Dashboard | 5002 | support |
+| bitcoin.quantitativegenius.com | Bitcoin Market Index Dashboard | 5003 | support |
+| gold.quantitativegenius.com | Gold Time Machine Dashboard | 5004 | support |
+| quantitativegenius.com/paywall-gate/ | Paywall pages (static) | N/A | N/A |
+| Auth API (internal) | Authentication & Stripe | 5010 | root |
+
+---
+
+## 2. GitHub Repositories
+
+| Repository | Visibility | Branch | Description |
+|---|---|---|---|
+| CybersecurityAnnouncementDotcom/qg-auth | PRIVATE | master | Auth system (magic links, Stripe webhooks, session management) |
+| CybersecurityAnnouncementDotcom/qg-deploy | PRIVATE | master | Landing page, paywall HTMLs, Bitcoin dashboard, Gold dashboard, Nginx config |
+| CybersecurityAnnouncementDotcom/oil-markets-time-machine-dashboard | PUBLIC | main | Oil Markets Time Machine Dashboard |
+| CybersecurityAnnouncementDotcom/world-markets-time-machine-dashboard | PUBLIC | main | World Markets Time Machine Dashboard |
+| CybersecurityAnnouncementDotcom/cybersecurity-threat-index-dashboard | PUBLIC | main | Cybersecurity Threat Index Dashboard |
+
+### Git Config
+
+```bash
+git config user.email "jq_007@yahoo.com"
+git config user.name "QuantitativeGenius"
+```
+
+---
+
+## 3. VPS Directory Structure
+
+```
+/var/www/quantitativegenius.com/
+    index.html                          · Landing page (from qg-deploy)
+
+/var/www/paywall-gate/
+    index.html                          · Cyber paywall (default)
+    oil.html                            · Oil paywall
+    world.html                          · World paywall
+
+/home/support/
+    oil-markets-time-machine-dashboard/        · Oil dashboard app
+        server.js
+        fetch_oil.py
+        public/
+        data/oil_markets.db
+        data/exports/                   · Pre-generated export files (VPS only)
+
+    world-markets-time-machine-dashboard/      · World dashboard app
+        server.js
+        fetch_data.py
+        public/
+        data/world_markets.db
+        data/exports/                   · Pre-generated export files (VPS only)
+
+    cybersecurity-threat-index-dashboard/   · Cyber dashboard app
+        server.js
+        seed_data.py
+        public/
+        data/cybersecurity.db
+
+    bitcoin-market-index-dashboard/   · Bitcoin dashboard app
+        server.js
+        public/
+        data/bitcoin_markets.db
+        data/exports/
+
+    gold-time-machine-dashboard/       · Gold dashboard app (owned by root, chown support)
+        server.js
+        public/
+        data/gold_markets.db
+        data/exports/
+
+    deploy-guard.sh                     · MANDATORY before any VPS file change
+    deploy-done.sh                      · MANDATORY after any deployment
+
+/opt/qg-auth/                           · Auth server
+    auth-server.js
+    auth-routes.js
+    auth-middleware.js
+    magic-link.js
+    stripe-webhook.js
+    setup-db.js
+    migrate-add-tier.js
+    ecosystem.config.js                 · Contains API keys (Stripe, Resend)
+
+/etc/nginx/sites-enabled/dashboards    · Nginx config for all subdomains
+/etc/nginx/snippets/rate-limit.conf    · Nginx rate limiting zones
+/swapfile                              · 2GB swap file (permanent via /etc/fstab)
+```
+
+---
+
+## 4. Regular Deployment Process
+
+### Method A: Git Fetch + Checkout on VPS (Preferred)
+
+> **CRITICAL (Thread 19 Fix):** NEVER use `git pull`. NEVER use `git checkout main --`. Always use `git fetch origin main` + `git checkout origin/main -- <file>`.
+
+Complete deployment sequence (v4.8+, deploy-guard MANDATORY):
+
+```bash
+# 1. Make code changes locally · push to GitHub
+
+# 2. SSH to VPS:
+ssh -o StrictHostKeyChecking=no support@35.233.231.75
+
+# 3. MANDATORY: Run deploy-guard FIRST (stops PM2, backs up DB, integrity check)
+source ~/deploy-guard.sh <world|oil|cyber>
+
+# 4. Set git config (required every session)
+git config --global user.email "jq_007@yahoo.com"
+git config --global user.name "QuantitativeGenius"
+
+# 5. Pull from GitHub
+cd /home/support/<dashboard-repo>
+git fetch origin main
+git checkout origin/main -- <files>
+
+# 6. Validate (always grep before restart)
+grep -c DASHBOARD_PRODUCT_ID server.js
+
+# 7. MANDATORY: Run deploy-done (restarts PM2, health check, integrity check)
+source ~/deploy-done.sh <world|oil|cyber>
+```
+
+> **CRITICAL (v4.8):** NEVER skip deploy-guard.sh. NEVER run `git reset --hard` while PM2 is running.
+
+### Method B: Transfer Site (When Git Pull Is Not Available)
+
+When the VPS doesn't have Git credentials set up, or a file needs to be transferred directly:
+
+1. In Perplexity Computer workspace: Create/update the file, then deploy a temporary transfer site.
+2. On the VPS: Use `curl` or `wget` to download from the transfer URL.
+
+```bash
+cd /home/support/oil-markets-time-machine-dashboard && \
+curl -sL "TRANSFER_URL/server.js" -o server.js && \
+pm2 delete oil-dashboard && pm2 start server.js --name oil-dashboard
+```
+
+### Method C: Base64-Embedded Deploy Script (Preferred for Multi-File Updates)
+
+For deploying multiple files at once when VPS has no git access to the repos:
+
+1. In Perplexity Computer: Make changes across repos, commit & push to GitHub
+2. Generate a `.sh` script that base64-encodes all changed files inline
+3. User uploads the script to VPS via Google Cloud SSH-in-browser "Upload File" button
+4. User runs the script on VPS
+
+**Important deployment script conventions:**
+- Script filename must be unique and descriptive (e.g., `deploy-cors-fix.sh`, not `deploy.sh`)
+- Uploaded files land in the SSH user's home directory (e.g., `/home/support/`)
+- Dashboard scripts must run as support user: `sudo -u support bash /home/support/deploy-xyz.sh`
+- Auth scripts must run as root: `sudo bash /home/support/deploy-xyz.sh`
+- Scripts should back up existing files before overwriting
+- Scripts should restart PM2 by ID (cyber=0, world=1, oil=2, bitcoin=3, gold=4, auth=varies), not by name
+- Scripts should verify all processes are online at the end
+
+### Method D: Direct SSH from Perplexity Computer (Preferred · April 7, 2026+)
+
+Perplexity Computer can SSH directly into the VPS from its sandbox.
+
+**Setup for new session:**
+
+```bash
+# In Perplexity Computer sandbox:
+ssh-keygen -t ed25519 -f /home/user/.ssh/id_ed25519 -N '' -C 'computer-agent'
+# Then add the public key to VPS authorized_keys (requires user assistance for first session)
+```
+
+**Key details:**
+- SSH key is ephemeral per sandbox session · a new key must be generated and added at the start of each new Perplexity Computer session
+- Key comment: `computer-agent`
+- Key type: ed25519, located at `/home/user/.ssh/id_ed25519` in the sandbox
+- Connection: `ssh -o StrictHostKeyChecking=no support@35.233.231.75`
+- Root operations (auth system, nginx): not available directly — support user has no passwordless sudo
+
+---
+
+## 5. Deploying Individual Dashboards
+
+### Oil Markets Time Machine Dashboard
+
+```bash
+# STEP 1: MANDATORY deploy-guard
+source ~/deploy-guard.sh oil
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Pull from GitHub
+cd /home/support/oil-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- server.js public/index.html
+
+# STEP 4: Validate
+grep -c 'DASHBOARD_PRODUCT_ID' server.js
+# Also validate BTC endpoint if deploying Thread 24 changes:
+grep -c 'bitcoin' server.js
+
+# STEP 5: MANDATORY deploy-done
+source ~/deploy-done.sh oil
+```
+
+**Key files:**
+- `server.js` · Express server, SQLite, yfinance + BTC fetch every 60s, auth middleware, export endpoints
+- `fetch_oil.py` · Python script to get WTI/Brent prices
+- `public/index.html` · Frontend dashboard + Pro export UI + BTC toggle (Thread 24)
+- `data/oil_markets.db` · SQLite database (DO NOT delete)
+- `data/exports/` · Pre-generated export files (VPS only, not in GitHub)
+
+If pm2 process doesn't exist, start fresh:
+
+```bash
+pm2 start server.js --name oil-dashboard
+pm2 save
+```
+
+### World Markets Time Machine Dashboard
+
+```bash
+# STEP 1: MANDATORY deploy-guard
+source ~/deploy-guard.sh world
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Pull from GitHub
+cd /home/support/world-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- server.js public/index.html generate_exports.py
+
+# STEP 4: Validate (also regenerate exports if export logic changed)
+grep -c 'DASHBOARD_PRODUCT_ID' server.js
+# If generate_exports.py changed or after any DB modification:
+python3 generate_exports.py
+
+# STEP 5: MANDATORY deploy-done
+source ~/deploy-done.sh world
+```
+
+**Key files:**
+- `server.js` · Express server, 20-ticker composite, yfinance + BTC fetch every 60s, auth middleware, export endpoints, Pro API endpoints
+- `fetch_data.py` · Python script for all 20 tickers
+- `generate_exports.py` · Daily CSV/JSON export generator (run by nightly-export.sh system cron)
+- `public/index.html` · Frontend with 3-line chart + BTC toggle (Thread 24) + Pro export UI
+- `data/world_markets.db` · SQLite database (DO NOT delete)
+- `data/exports/` · Pre-generated export files (VPS only, not in GitHub)
+
+### Cybersecurity Threat Index Dashboard
+
+```bash
+# STEP 1: MANDATORY deploy-guard
+source ~/deploy-guard.sh cyber
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Pull from GitHub
+cd /home/support/cybersecurity-threat-index-dashboard
+git fetch origin main
+git checkout origin/main -- server.js public/index.html
+
+# STEP 4: Validate
+grep -c 'DASHBOARD_PRODUCT_ID' server.js
+
+# STEP 5: MANDATORY deploy-done
+source ~/deploy-done.sh cyber
+```
+
+**Key files:**
+- `server.js` · Express server, reads from seeded database, auth middleware, export endpoints
+- `seed_data.py` · Seeds 123 months of data (Jan 2016 - Mar 2026)
+- `add_events.py` · Adds recent events/commentary
+- `public/index.html` · Frontend with threat gauge + distribution + Pro export UI
+- `data/cybersecurity.db` · SQLite database (DO NOT delete)
+
+Note: Daily 6AM cron for cyber data refresh is currently PAUSED.
+
+### Bitcoin Market Index Dashboard (Thread 28)
+
+The Bitcoin dashboard lives in the `qg-deploy` repo (private), subdirectory `bitcoin-market-index-dashboard/`.
+
+```bash
+# STEP 1: deploy-guard does NOT support 'bitcoin' yet — manually stop PM2
+pm2 stop bitcoin
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Pull from GitHub
+cd /home/support/bitcoin-market-index-dashboard
+# NOTE: This directory is NOT a git repo on VPS — files are deployed via SCP or
+# cloned fresh from qg-deploy/bitcoin-market-index-dashboard/
+# To update:
+scp -o StrictHostKeyChecking=no <local-file> support@35.233.231.75:/home/support/bitcoin-market-index-dashboard/<path>
+
+# STEP 4: Validate
+grep -c 'pctDualAxis' public/index.html  # Should be 5+
+grep -c 'fetchYahooPrice' server.js       # Should be 3+
+
+# STEP 5: Restart PM2
+pm2 restart bitcoin
+pm2 status
+```
+
+**Key files:**
+- `server.js` · Express server, BTC/NASDAQ/DJI fetching, S&P from World DB (read-only), auth middleware, export endpoints
+- `public/index.html` · Frontend dashboard with stock toggles, dual-axis % mode, Pro export UI
+- `data/bitcoin_markets.db` · SQLite database (bitcoin_data, nasdaq_data, dji_data)
+- `rate-limiter.js` · In-memory rate limiting module
+
+**PM2 process:** `bitcoin` (ID 3) on port 5003.
+
+**Note:** deploy-guard.sh and deploy-done.sh do not yet support the `bitcoin` argument. Manual PM2 stop/restart is required until those scripts are updated.
+
+### Gold Time Machine Dashboard (Thread 30)
+
+The Gold dashboard lives in the `qg-deploy` repo (private), subdirectory `gold-time-machine-dashboard/`.
+
+```bash
+# STEP 1: deploy-guard does NOT support 'gold' yet — manually stop PM2
+pm2 stop gold
+
+# STEP 2: Set git config
+git config --global user.email "jq_007@yahoo.com" && git config --global user.name "QuantitativeGenius"
+
+# STEP 3: Deploy via SCP (gold files owned by root)
+# From Perplexity Computer sandbox or local:
+scp -o StrictHostKeyChecking=no <local-file> root@35.233.231.75:/home/support/gold-time-machine-dashboard/<path>
+# Then fix ownership:
+ssh root@35.233.231.75 'chown -R support:support /home/support/gold-time-machine-dashboard/'
+
+# STEP 4: Validate
+grep -c 'gtm_composite' public/index.html  # Should be present
+grep -c 'fetchYahooPrice' server.js         # Should be present
+
+# STEP 5: Restart PM2
+pm2 restart gold
+pm2 status
+```
+
+**Key files:**
+- `server.js` · Express server, GC=F/^HUI/GDX/SI=F/^XAU fetching, BTC fetch, auth middleware, export endpoints
+- `public/index.html` · Frontend dashboard with component toggles, GTM composite chart, Pro export UI
+- `data/gold_markets.db` · SQLite database
+- `generate_exports.py` · Daily export generator
+
+**PM2 process:** `gold` (ID 4) on port 5004.
+
+**Note:** Gold files on VPS are owned by root. Must use `scp root@...` then `chown support:support`. deploy-guard.sh and deploy-done.sh do not yet support the `gold` argument.
+
+---
+
+## 6. Deploying the Landing Page
+
+```bash
+# SSH as root (need write access to /var/www/)
+ssh root@35.233.231.75
+cd /tmp
+git clone https://github.com/CybersecurityAnnouncementDotcom/qg-deploy.git
+cp /tmp/qg-deploy/landing-index.html /var/www/quantitativegenius.com/index.html
+rm -rf /tmp/qg-deploy
+```
+
+Or via transfer site:
+
+```bash
+curl -sL "TRANSFER_URL/landing-index.html" -o /var/www/quantitativegenius.com/index.html
+```
+
+---
+
+## 7. Deploying the Auth System
+
+Auth files must be embedded inline in deploy scripts — VPS has no GitHub credentials for private repos.
+
+```bash
+# SSH as root
+ssh root@35.233.231.75
+# Auth files must be embedded inline in deploy scripts · VPS has no GitHub credentials for private repos
+pm2 restart 0  # qg-auth (verify ID with pm2 list first)
+```
+
+**Auth server location:** `/opt/qg-auth/`
+
+---
+
+## 8. Deploying Paywall Pages
+
+```bash
+# SSH as root
+ssh root@35.233.231.75
+cd /tmp
+git clone https://github.com/CybersecurityAnnouncementDotcom/qg-deploy.git
+cp /tmp/qg-deploy/cyber-paywall.html /var/www/paywall-gate/index.html
+cp /tmp/qg-deploy/oil-paywall.html /var/www/paywall-gate/oil.html
+cp /tmp/qg-deploy/world-paywall.html /var/www/paywall-gate/world.html
+rm -rf /tmp/qg-deploy
+```
+
+---
+
+## 9. PM2 Process Management
+
+### View All Processes
+
+```bash
+# As support user (dashboards)
+su - support
+pm2 list
+
+# As root (auth server)
+pm2 list
+```
+
+### Common PM2 Commands
+
+```bash
+pm2 restart <name>       # Restart a process
+pm2 stop <name>          # Stop a process
+pm2 delete <name>        # Remove from PM2
+pm2 logs <name>          # View logs
+pm2 logs <name> --lines 50  # Last 50 log lines
+pm2 save                 # Save current process list
+pm2 startup              # Set PM2 to start on boot
+```
+
+### Current PM2 Process Names & IDs (as of Thread 30, April 2026)
+
+| PM2 Name | PM2 ID | Port | User |
+|---|---|---|---|
+| cyber | 0 | 5002 | support |
+| world | 1 | 5001 | support |
+| oil | 2 | 5000 | support |
+| bitcoin | 3 | 5003 | support |
+| gold | 4 | 5004 | support |
+| (export crons removed) | — | — | See Section 18 |
+| qg-auth | varies | 5010 | root |
+
+> **Note:** PM2 IDs change after a full VM reboot or when processes are deleted and recreated. Always verify with `pm2 list` before using IDs. Reference by name when possible. The old `oil-export-cron` and `world-export-cron` PM2 processes were removed in Thread 25 (April 10, 2026) and replaced by a system crontab (see Section 18).
+
+### CRITICAL: Never Auto-Restart PM2 Processes
+
+Do NOT create any cron job, systemd timer, or script that runs `pm2 restart all` or `pm2 restart <name>` automatically. SQLite databases are corrupted when Node.js processes are killed mid-write. All restarts must be manual, through deployment scripts reviewed by a human.
+
+Before any deployment, verify: `crontab -l` (as support user) should show only the nightly export cron (`0 4 * * * /home/support/nightly-export.sh`). No other entries should exist.
+
+### deploy-guard.sh and deploy-done.sh (MANDATORY · April 8, 2026+)
+
+Two scripts at `/home/support/` on VPS are MANDATORY for all deployments:
+
+**deploy-guard.sh · Run BEFORE any VPS file modification:**
+
+```bash
+source ~/deploy-guard.sh <world|oil|cyber>
+```
+
+Does: stops PM2 process, backs up SQLite DB, runs integrity check. If integrity fails, aborts and does NOT proceed.
+
+**deploy-done.sh · Run AFTER deployment:**
+
+```bash
+source ~/deploy-done.sh <world|oil|cyber>
+```
+
+Does: restarts PM2, runs HTTP health check, runs DB integrity check.
+
+**Why this is mandatory:** Running `git reset --hard`, `git checkout`, `sed`, or any file write while PM2 is running can corrupt the SQLite database (Node.js holds write locks). The April 8 world DB corruption incident was caused by skipping this step.
+
+**NEVER skip deploy-guard.sh, even for "small" changes.**
+
+---
+
+## 10. Nginx Configuration
+
+Config file: `/etc/nginx/sites-enabled/dashboards`
+Rate limit config: `/etc/nginx/snippets/rate-limit.conf`
+
+After editing Nginx config:
+
+```bash
+nginx -t                  # Test configuration
+systemctl reload nginx    # Apply changes
+```
+
+---
+
+## 11. SSL Certificate Renewal
+
+The SSL certificate covers all subdomains and expires July 1, 2026. Auto-renewal should be set up via Certbot cron. To check:
+
+```bash
+certbot certificates
+```
+
+To manually renew:
+
+```bash
+certbot renew
+systemctl reload nginx
+```
+
+---
+
+## 12. Troubleshooting
+
+### Database Corruption Prevention (CRITICAL · April 6, 2026)
+
+**Root Cause Identified:** An hourly cron job ran `pm2 restart all` every hour. This killed Node.js processes mid-SQLite-write, corrupting databases.
+
+**Fix Applied:**
+- Removed the auto-update cron: `crontab -r` (as support user)
+- Re-backfilled world database (5,285 readings, 2006–present)
+- Backfilled S&P 500 pre-2006 data (1,508 records, 2000–2006) with RAW prices into world's `country_data` table
+- Restarted all dashboards
+
+**Prevention Rules:**
+1. NEVER create a cron that runs `pm2 restart all` or any automated PM2 restart
+2. NEVER run backfill scripts while dashboards are running · stop PM2 first
+3. ALWAYS verify `crontab -l` shows ONLY `0 4 * * * /home/support/nightly-export.sh`
+4. ALWAYS run `PRAGMA integrity_check` on all databases after any deployment
+5. NEVER use `git checkout main --` · always `git checkout origin/main --` (Thread 19 fix)
+6. When updating World export logic, also update `generate_exports.py` AND regenerate pre-generated files
+
+**Cross-Dashboard Dependency:** Oil's S&P 500 overlay reads from the WORLD database (`country_data` table, ticker `^GSPC`). If the world DB is corrupted or missing, BOTH dashboards lose overlay lines. Always fix world DB first.
+
+### Dashboard Shows No Data
+
+1. Check PM2 logs: `pm2 logs <name> --lines 100`
+2. Verify Python/yfinance is working: `cd /home/support/<dashboard> && python3 fetch_oil.py`
+3. Check database: `sqlite3 data/<db>.db "SELECT COUNT(*) FROM readings;"`
+
+### Dashboard Not Accessible
+
+1. Check PM2 status: `pm2 list`
+2. Check Nginx: `systemctl status nginx`
+3. Test port directly: `curl http://localhost:5000`
+
+### 502 Bad Gateway
+
+PM2 process is likely down. Check and restart:
+
+```bash
+pm2 list
+pm2 restart <name>
+```
+
+### Database Locked
+
+WAL file issue. Stop process, checkpoint, restart:
+
+```bash
+pm2 stop <name>
+sqlite3 data/<db>.db "PRAGMA wal_checkpoint(TRUNCATE);"
+pm2 start <name>
+```
+
+### 1H/1D Charts Show No Line, Few Points, or Stale Timestamps
+
+The 1H and 1D views only display data from the actual requested time window. If the dashboard was recently restarted or backfilled, these views may be empty or sparse until enough live readings accumulate (one reading per 60 seconds). This is expected.
+
+### Historical Data Shows Wrong Values (Data Regression)
+
+Root cause: Pulling updated code and restarting PM2 only fixes new data points going forward. Historical data must be recalculated by re-running backfill scripts.
+
+```bash
+# 1. Fetch latest code (NEVER use git pull)
+cd /home/support/oil-markets-time-machine-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
+cd /home/support/world-markets-time-machine-dashboard && git fetch origin main && git checkout origin/main -- backfill.py server.js
+
+# 2. Stop dashboards so backfill has exclusive DB access
+pm2 stop oil-dashboard
+pm2 stop world-dashboard
+
+# 3. Re-run backfills (oil requires --force flag, world auto-clears)
+cd /home/support/oil-markets-time-machine-dashboard && python3 backfill.py --force
+cd /home/support/world-markets-time-machine-dashboard && python3 backfill.py
+
+# 4. Restart dashboards
+pm2 restart oil-dashboard
+pm2 restart world-dashboard
+pm2 save
+pm2 list
+```
+
+### Pre-Generated Export File Is Stale
+
+If CSV/JSON exports show wrong data (e.g., wrong date ranges, missing columns):
+
+1. Verify the `data/exports/` files are not stale
+2. Stop the dashboard process via deploy-guard
+3. Regenerate: `python3 generate_exports.py`
+4. Restart via deploy-done
+
+This was the root cause of the Thread 24 CSV date filter issue (World MAX CSV showed 2006-01-02 instead of 2006-01-04).
+
+### Bitcoin Overlay Shows No Data
+
+1. Check if `bitcoin_data` table exists: `sqlite3 data/oil_markets.db ".tables"`
+2. Check table is populated: `sqlite3 data/oil_markets.db "SELECT COUNT(*) FROM bitcoin_data;"`
+3. The table is created automatically by server.js on first run — no manual setup needed
+4. BTC data accumulates from first deploy forward. On a fresh deploy, 1H/1D will show sparse data until readings accumulate.
+5. Check PM2 logs for BTC fetch errors: `pm2 logs oil-dashboard --lines 50`
+
+---
+
+## 13. API Key System Deployment (April 7, 2026)
+
+### What Was Built
+
+- Complete API key infrastructure for Pro subscribers
+- `api_keys` table with SHA-256 hash storage
+- 4 auth endpoints for key management
+- Key format: `qg_` + 32 hex chars (stored as SHA-256 hash, prefix shown in UI)
+- One active key per user (generating new key revokes old one)
+- API key access is per-product: each dashboard passes its Stripe product ID
+
+### Deployment
+
+The API key system is deployed as part of the auth server. Files are embedded inline in deploy scripts (no git pull needed for private repo).
+
+**Key commits:** qg-deploy 1a66d06, cyber a3ce45a, oil bb1455a, world 4620269
+
+### Stripe Pro Price IDs
+
+**Current pricing (10x increase — April 11, 2026, Thread 26):**
+
+| Tier | Monthly | Yearly |
+|---|---|---|
+| Individual Basic | $390/mo | $3,900/yr |
+| Individual Pro | $590/mo | $5,900/yr |
+| All-Access Basic | $790/mo | $7,900/yr |
+| All-Access Pro | $990/mo | $9,900/yr |
+
+**Legacy Pro Price IDs (kept for existing subscribers):**
+
+| Product | Monthly ($59 legacy) | Yearly ($590 legacy) |
+|---|---|---|
+| Oil Pro | price_1THhsnKXRVV7arrHEqtwMM7L | price_1THhsnKXRVV7arrHy4W5CdKb |
+| World Pro | price_1THhsoKXRVV7arrHW1dndy6D | price_1THhsoKXRVV7arrHYYV23gR5 |
+| Cyber Pro | price_1THhspKXRVV7arrHunUc5LjR | price_1THhspKXRVV7arrHudiK0fRG |
+| Bundle Pro | price_1THhspKXRVV7arrHdcBM4qz2 ($99/mo legacy) | price_1THhsqKXRVV7arrHi6qlZUW5 ($990/yr legacy) |
+
+> **TODO:** After adding new Stripe price IDs to `PRO_PRICE_IDS` in `stripe-webhook.js`, update this table with the new IDs. See QG-Master-Reference for full new price ID table.
+
+---
+
+## 14. Bitcoin Overlay Deployment (Thread 24)
+
+### Overview
+
+The Bitcoin price overlay was added to both Oil and World dashboards in Thread 24. It uses native Node.js `https.get` to fetch BTC-USD from Yahoo Finance — no Python changes are needed.
+
+### Files Modified
+
+| Dashboard | File | Change |
+|---|---|---|
+| Oil | `server.js` | Added BTC fetch loop (https.get every 60s), `bitcoin_data` table creation, `/api/bitcoin-history` endpoint |
+| Oil | `public/index.html` | Added ₿ toggle button, BTC chart overlay, nearest-match algorithm, right Y-axis in raw mode |
+| World | `server.js` | Added BTC fetch loop (https.get every 60s), `bitcoin_data` table creation, `/api/bitcoin-history` endpoint |
+| World | `public/index.html` | Added ₿ toggle button, BTC chart overlay, nearest-match algorithm, right Y-axis in raw mode |
+
+### No Python Changes Needed
+
+BTC fetching is implemented entirely in Node.js (native `https` module in server.js). No changes to `fetch_oil.py`, `fetch_data.py`, `backfill.py`, or `generate_exports.py` are required for the BTC fetch itself.
+
+**Note:** `generate_exports.py` does need updating to include the `bitcoin_price` column in CSV exports — query the `bitcoin_data` table by date and join to the main readings.
+
+### Database Setup
+
+The `bitcoin_data` table is created **automatically by server.js on first run**. No manual migration is required.
+
+```sql
+CREATE TABLE IF NOT EXISTS bitcoin_data (
+    timestamp TEXT,
+    price REAL
+);
+```
+
+### No Backfill Needed
+
+BTC data accumulates from the first deploy forward. There is no historical backfill. On a fresh deploy, 1H/1D views will start empty and populate over time.
+
+### Deployment Steps
+
+```bash
+# STEP 1: Push updated server.js and public/index.html to GitHub for both dashboards
+
+# STEP 2: Deploy World dashboard
+source ~/deploy-guard.sh world
+cd /home/support/world-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- server.js public/index.html
+# Validate BTC endpoint present:
+grep -c 'bitcoin' server.js
+grep -c 'bitcoin' public/index.html
+source ~/deploy-done.sh world
+
+# STEP 3: Deploy Oil dashboard
+source ~/deploy-guard.sh oil
+cd /home/support/oil-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- server.js public/index.html
+# Validate BTC endpoint present:
+grep -c 'bitcoin' server.js
+grep -c 'bitcoin' public/index.html
+source ~/deploy-done.sh oil
+
+# STEP 4: Verify bitcoin_data table exists after restart
+sqlite3 /home/support/world-markets-time-machine-dashboard/data/world_markets.db ".tables"
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db ".tables"
+# Expected: bitcoin_data should appear in both
+```
+
+### Post-Deployment Verification
+
+```bash
+# Test BTC history API endpoint (requires valid session/API key)
+curl -s http://localhost:5001/api/bitcoin-history?range=1H | head -c 200
+curl -s http://localhost:5000/api/bitcoin-history?range=1H | head -c 200
+
+# Check BTC data is accumulating (wait 60+ seconds after deploy)
+sqlite3 /home/support/world-markets-time-machine-dashboard/data/world_markets.db \
+  "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM bitcoin_data;"
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db \
+  "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM bitcoin_data;"
+```
+
+### Key Commits
+
+| Dashboard | Commit | Description |
+|---|---|---|
+| World | 62d3201 | Bitcoin overlay with nearest-match algorithm |
+| Oil | 815d02a | Bitcoin overlay with nearest-match algorithm |
+
+---
+
+## 15. Swap File Deployment (Thread 24 / April 8, 2026)
+
+### Background
+
+The e2-micro VPS (958MB RAM) experienced a full OOM (Out of Memory) crash on April 8, 2026, taking all three dashboards offline for ~7 hours. The root cause was no swap file configured. A 2GB swap file was created immediately after the incident as a permanent fix.
+
+### One-Time Setup (Already Applied — Included Here for Disaster Recovery)
+
+If rebuilding the VPS from scratch, create the swap file before starting the dashboards:
+
+```bash
+# Create swap file (requires root)
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+
+# Make permanent across reboots
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+### Verification
+
+```bash
+# Verify swap is currently active
+free -h
+# Expected output (Swap line):
+# Swap:          2.0Gi       XXXMi       XXXGi
+
+# Verify swap persists across reboots
+grep swap /etc/fstab
+# Expected:
+# /swapfile none swap sw 0 0
+```
+
+### Monitoring
+
+Swap usage is part of the monthly monitoring checklist. Run `free -h` to confirm swap is still active after any VM reboot or maintenance window.
+
+---
+
+## 16. Deploy Guard Reminder
+
+This section is a standalone reminder of the mandatory deployment workflow. All rules exist because of real database corruption incidents.
+
+### ALWAYS: Pre-Deployment
+
+```bash
+# Run deploy-guard BEFORE touching any file on VPS
+source ~/deploy-guard.sh <world|oil|cyber>
+```
+
+This script:
+1. **Stops** the PM2 process (prevents mid-write corruption)
+2. **Backs up** the SQLite database with timestamp
+3. **Runs integrity check** — aborts if not `ok`
+
+### ALWAYS: Post-Deployment
+
+```bash
+# Run deploy-done AFTER deployment is complete
+source ~/deploy-done.sh <world|oil|cyber>
+```
+
+This script:
+1. **Restarts** the PM2 process
+2. **HTTP health check** — verifies dashboard responds HTTP 200
+3. **Post-deploy integrity check** — confirms DB is intact
+
+### NEVER: Forbidden Operations
+
+| What | Why |
+|---|---|
+| `git pull` | Merges can run mid-write if PM2 is running; caused DB corruption April 6 |
+| `git reset --hard` while PM2 running | Wipes working tree including live DB file; caused DB corruption April 8 |
+| `sed` on VPS | Regex errors can silently corrupt config or source files |
+| `python3 -c` inline patches | Unreliable; hard to audit; has caused partial writes |
+| Automated PM2 restart crons | Restart during write = DB corruption; all restarts must be manual |
+| Skipping deploy-guard for "small" changes | No exceptions — even a one-line change can corrupt the DB if PM2 is writing |
+
+### Git Operations (Correct Pattern)
+
+```bash
+# CORRECT: Fetch specific file without running merge logic
+git fetch origin main
+git checkout origin/main -- server.js public/index.html
+
+# WRONG: Never do this
+# git pull
+# git checkout main -- server.js   (uses local branch, may be stale)
+# git reset --hard origin/main
+```
+
+### Version Control Discipline
+
+- **Push to GitHub first**, then deploy to VPS.
+- GitHub is the source of truth. The VPS is a deployment target, not a development environment.
+- Never make edits directly on the VPS that are not first committed to the repository.
+- After any `git push`, you MUST also deploy to VPS — pushing to GitHub does NOT deploy automatically.
+
+### Deployment Order (When Deploying Multiple Components)
+
+```
+1. Auth server (qg-auth) → deploy first
+2. Dashboard(s) → deploy second
+3. Nginx config → deploy LAST
+```
+
+Deploying nginx last ensures the auth server and dashboards are running and healthy before traffic is routed to them.
+
+---
+
+## 17. Documentation Deployment
+
+### Source of Truth
+
+GitHub is the single source of truth for all documentation. The VPS always pulls docs from GitHub — never edit docs directly on the VPS.
+
+Each dashboard repo has a `docs/` directory containing:
+- The dashboard's methodology PDF (e.g., `Oil_Market_Index_Methodology_v4.0.pdf`)
+- `QG-Master-Reference-v28.0.md`
+- `QG-Deployment-Guide-v10.0.md` (this document)
+- `QG-Security-Reference-v1.4.md`
+- `QG-Account-Recovery-Guide.md`
+
+The QG reference docs are duplicated across all dashboard repos so each project is self-contained. The `qg-deploy` repo (Bitcoin + Gold + shared pages) also contains a copy in its `docs/` directory.
+
+### Updating Documentation
+
+```bash
+# 1. Update docs in the workspace, push to GitHub
+# Example: updated Oil methodology
+cd oil-markets-time-machine-dashboard
+cp updated_doc.pdf docs/
+git add docs/
+git commit -m "docs: update Oil methodology to v4.1"
+git push origin main
+
+# 2. If a QG reference doc changed, push to ALL THREE repos
+# (Master, Deploy, and Security are shared across all dashboards)
+```
+
+### Deploying Docs to VPS
+
+Use the same deploy-guard/deploy-done workflow as code:
+
+```bash
+# For EACH dashboard that has updated docs:
+source ~/deploy-guard.sh <dashboard>
+git fetch origin main
+git checkout origin/main -- docs/
+source ~/deploy-done.sh <dashboard>
+```
+
+When a shared QG reference doc changes, deploy to all three dashboards:
+
+```bash
+for dash in oil world cyber; do
+  cd /home/support/$(case $dash in
+    oil) echo oil-markets-time-machine-dashboard;;
+    world) echo world-markets-time-machine-dashboard;;
+    cyber) echo cybersecurity-threat-index-dashboard;;
+  esac)
+  source ~/deploy-guard.sh $dash
+  git fetch origin main
+  git checkout origin/main -- docs/
+  source ~/deploy-done.sh $dash
+done
+```
+
+### Rules
+
+- **NEVER** create or edit docs directly on the VPS
+- **NEVER** SCP/rsync docs to the VPS — always push to GitHub first, then pull
+- When updating a shared QG reference doc, update and push to ALL THREE repos, then deploy all three
+- When updating a dashboard-specific methodology PDF, only that repo needs updating
+
+---
+
+## 18. Nightly Export Cron Deployment (Thread 25 · April 10, 2026)
+
+### What Was Deployed
+
+Replaced the unreliable PM2-based export crons with a system crontab that safely stops dashboards before running exports. The nightly export now includes Oil, World, Bitcoin, and Gold with `timeout 120` applied to each export run.
+
+### Problem
+
+The old `oil-export-cron` and `world-export-cron` PM2 processes had two fatal flaws:
+1. **PM2 `cron_restart` doesn't fire for stopped processes.** Both had drifted to "stopped" state after their one-time run, so PM2 never re-triggered them.
+2. **Running `generate_exports.py` while dashboards are active causes OOM.** On April 10, running exports via screen while all 3 dashboards were active spiked load to 52 and crashed the server.
+
+### Solution
+
+1. Created `/home/support/nightly-export.sh` — stops Oil + World PM2, runs both exports, restarts, health checks
+2. Installed system crontab: `0 4 * * *` (4:00 AM UTC / 9:00 PM PDT)
+3. Removed old PM2 export crons: `pm2 delete oil-export-cron` and `pm2 delete world-export-cron`
+4. Saved PM2 state: `pm2 save`
+
+### Also Deployed: WAL Mode on Oil
+
+Oil's SQLite was using `delete` journal mode (the legacy default), causing ~18% of fetch attempts to fail with "database is locked". Fixed with:
+
+```sql
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode=WAL;'
+```
+
+### Verification
+
+```bash
+# Cron installed
+crontab -l
+# Expected: 0 4 * * * /home/support/nightly-export.sh
+
+# PM2 clean (5 dashboard processes)
+pm2 list
+# Expected: cyber(0), world(1), oil(2), bitcoin(3), gold(4) — no export crons
+
+# WAL mode confirmed
+sqlite3 /home/support/oil-markets-time-machine-dashboard/data/oil_markets.db 'PRAGMA journal_mode;'
+# Expected: wal
+
+# Check export log after first run
+tail -20 /home/support/nightly-export.log
+```
+
+---
+
+## 19. BTC Independent Charting Deployment (Thread 27 · April 11, 2026)
+
+### What Was Deployed
+
+BTC trades 24/7 but was previously mapped only onto main index timestamps. When oil/S&P/world markets closed, BTC would flatline or disappear from the chart. The fix appends real BTC timestamps beyond the last main index reading so the BTC line continues showing live price movement during off-hours.
+
+### Files Modified
+
+| Dashboard | File | Change |
+|---|---|---|
+| Oil | `public/index.html` | Appends BTC timestamps beyond last main reading; index/S&P show gaps during closed hours |
+| World | `public/index.html` | Appends BTC timestamps beyond last main reading; World/S&P/SSE show gaps during closed hours |
+
+### Key Commits
+
+| Dashboard | Commit | Description |
+|---|---|---|
+| Oil | 3e0108c | BTC continues charting on 1H/1D when markets are closed |
+| World | 9d94c68 | BTC continues charting on 1H/1D when markets are closed |
+
+### Deployment Steps
+
+```bash
+# STEP 1: Push updated public/index.html to GitHub for both dashboards
+
+# STEP 2: Deploy Oil dashboard
+source ~/deploy-guard.sh oil
+cd /home/support/oil-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- public/index.html
+source ~/deploy-done.sh oil
+
+# STEP 3: Deploy World dashboard
+source ~/deploy-guard.sh world
+cd /home/support/world-markets-time-machine-dashboard
+git fetch origin main
+git checkout origin/main -- public/index.html
+source ~/deploy-done.sh world
+```
+
+---
+
+## 20. Oil Export Performance Fix (Thread 30 · April 13, 2026)
+
+### Problem
+
+Oil's `generate_exports.py` used a correlated subquery in `get_daily_close_readings()` that was O(N*M) — for each of 6,495 rows, it ran a subquery against the full table. On the memory-constrained e2-micro VPS, this caused the Python process to hang at 90% CPU for 8+ minutes without producing output. This was the same pattern as Known Issue #17 (April 10, 2026).
+
+The user correctly identified this was a repeat of the earlier incident: "you just did the same thing earlier tonight."
+
+### Root Cause
+
+```sql
+-- SLOW (O(N*M) correlated subquery)
+SELECT * FROM readings r1 
+WHERE r1.timestamp = (
+  SELECT MAX(r2.timestamp) FROM readings r2 
+  WHERE date(r2.timestamp) = date(r1.timestamp)
+)
+```
+
+### Fix
+
+Rewrote to dictionary-based lookups matching the Bitcoin/Gold approach:
+
+```python
+# FAST (O(N) dictionary-based)
+daily_close = {}
+for row in all_readings:
+    date_key = row['timestamp'][:10]
+    daily_close[date_key] = row  # Last reading per date wins
+```
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| qg-deploy | ec5df73 | Oil export dictionary-based rewrite |
+| oil-markets-time-machine-dashboard | 9f9b203 | Same fix pushed to public repo |
+
+### Lesson
+
+**Rule: NEVER use correlated subqueries on e2-micro.** Always use dictionary-based or hash-join patterns for any grouping/windowing operation. The VPS has only 958MB RAM + 2GB swap — memory-intensive SQL patterns will OOM or zombie.
+
+---
+
+## Appendix: % Change Toggle Deployment (Thread 22 · April 8, 2026)
+
+### Files Changed
+
+- **Oil Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, single shared Y-axis (removed dual axis per user request)
+- **World Dashboard:** `public/index.html` · Added `.pct-toggle` button, `toPctChange()` function, all three lines normalize to % change
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| world-markets-time-machine-dashboard | dae358a | % Change toggle on World dashboard |
+| oil-markets-time-machine-dashboard | 68b0529 | Single shared Y-axis (removed dual axis) + % Change toggle |
+
+---
+
+## Appendix: Oil Export Consolidation Deployment (Thread 23 · April 9, 2026)
+
+### What Was Deployed
+
+Added `generate_exports.py` to Oil dashboard, matching the World pattern. Oil CSV was dumping every intraday row (~850/day); now consolidated to 1 row/day.
+
+### Files Changed
+
+- **Oil Dashboard:** `server.js` · Updated export endpoints with `tryServeFile()` + `GROUP BY date`
+- **Oil Dashboard:** `generate_exports.py` · New file (copied and adapted from World)
+- **Oil Dashboard:** `ecosystem.config.js` · Added `oil-export-cron` PM2 cron at 23:55 UTC
+
+### Key Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| oil-markets-time-machine-dashboard | 30685e3 | generate_exports.py + export consolidation |
+
+---
+
+---
+
+## Thread 31 · Deployment Updates
+
+### Short-name standardization for `deploy-guard.sh` / `deploy-done.sh`
+
+The deploy-guard script now accepts a short-name per dashboard. Always use these exact names (VPS matches by short name → dashboard directory):
+
+| Short name | Directory | Port |
+|---|---|---|
+| `oil` | `oil-markets-time-machine-dashboard` | 5001 |
+| `world` | `world-markets-index-dashboard` | 5002 |
+| `cyber` | `cybersecurity-threat-index-dashboard` | 5003 |
+| `bitcoin` | `bitcoin-market-index-dashboard` | 5003 |
+| `gold` | `gold-time-machine-dashboard` | 5004 |
+| `stocks` | `stock-market-time-machine-dashboard` | 5005 |
+| `auto` | `auto-market-index-dashboard` | 5006 |
+| `baseball` | `baseball-card-time-machine-dashboard` | 5007 |
+| `basketball` | `basketball-card-time-machine-dashboard` | 5008 |
+| `football` | `football-card-time-machine-dashboard` | 5009 |
+| `hockey` | `hockey-card-time-machine-dashboard` | 5011 |
+| `soccer` | `soccer-card-time-machine-dashboard` | 5012 |
+| `pokemon` | `pokemon-card-time-machine-dashboard` | 5013 |
+
+### Canonical deploy sequence (all dashboards)
+
+```bash
+# 1. Commit and push on workstation (GitHub first — no exceptions)
+cd /home/user/workspace/qg-build/repos/<dashboard>
+git add -A && git commit -m 'description' && git push origin master
+
+# 2. On VPS, gate-in
+ssh root@35.233.231.75
+sudo -u support -H bash -c 'source /home/support/deploy-guard.sh <short-name>'
+
+# 3. Fetch the specific file(s) changed
+sudo -u support -H bash -c 'cd /home/support/<dashboard-dir> && \
+  git fetch origin master && \
+  git checkout origin/master -- <path/to/file>'
+
+# 4. Gate-out — this restarts PM2 and verifies DB integrity
+sudo -u support -H bash -c 'source /home/support/deploy-done.sh <short-name>'
+```
+
+NEVER use `git pull`. NEVER use `git reset --hard`. NEVER `sed`/`python3 -c` a file on VPS. All three have corrupted SQLite DBs in the past (April 6, 7, 8 events).
+
+### GitHub-first gate for ALL system-of-record writes
+
+Thread 31 reinforced the pre-deploy gate after E9 (Stripe API writes without GitHub-first). **The gate covers every system-of-record write, not just VPS file writes.**
+
+System-of-record targets that require GitHub-first documentation:
+
+- VPS files (any dashboard, any script, any config)
+- Stripe (products, prices, coupons, payment links, webhook config)
+- DNS (any A/AAAA/MX/TXT record change)
+- GitHub Pages (any deployed site content)
+- Nginx server blocks on VPS
+- SSL certificates (renewal logs ok without gate; new certs require it)
+- PM2 ecosystem files
+
+For each, the PRE-DEPLOY GATE checklist must be satisfied:
+
+```
+PRE-DEPLOY GATE (all required before any system-of-record write):
+[ ] Change documented in qg-deploy/docs/ or repo commit message
+[ ] File edited in /home/user/workspace/qg-build/<repo>/
+[ ] Committed locally with descriptive message
+[ ] Pushed to GitHub origin/master
+[ ] Only THEN run the write (scp / ssh / stripe API / cloud API)
+```
+
+### Thread 31 dashboard deployments
+
+All 8 new dashboards followed the canonical sequence. Notable patterns:
+
+1. **Sports/Pokemon batch**: Shared template at `qg-build/sports-server-template.js` fills via `generate_sport_servers.py`. When the template changes, all 6 are regenerated and each is deploy-guarded separately with its own short name.
+2. **Gold/Stock market-hours gate** (commits `228c43f`, `f794969`): Standard two-file deploy (server.js). Gate applied via deploy-guard/deploy-done. No DB corruption. No downtime beyond PM2 restart.
+3. **Overlay UI wiring**: Ran as a subagent-driven multi-commit batch for 7 dashboards. Each repo committed/pushed on workstation, then VPS-side `git fetch + git checkout -- public/index.html server.js` gate-in/gate-out per dashboard.
+
+### Verification after any deploy
+
+```bash
+# Smoke test
+curl -sIL -H 'x-auth-plan-tier: pro' http://localhost:<port>/ | head -5
+# HTTP 200 expected
+
+# Check overlay HTML (for sports/auto/pokemon)
+curl -sL -H 'x-auth-plan-tier: pro' http://localhost:<port>/ | \
+  grep -cE 'data-key="(spx|gold|btc)"'
+# Expect 2 hits per key (style + button)
+```
+
+---
+
+*End of QG-Deployment-Guide-v11.0.md content — v11.1 addendum below*
+
+---
+
+## Thread 33 · Auto Market Index v2.0 Deployment Notes
+
+Thread 33 did NOT change the deployment procedure for the auto dashboard. The existing short-name / directory / port row in §4 is unchanged:
+
+| Short name | Directory | Port | PM2 name |
+|---|---|---|---|
+| `auto` | `auto-market-index-dashboard` | 5006 | `auto-dashboard` |
+
+### What changed in v11.1
+
+- **Methodology reference bumped:** `Auto_Market_Index_Methodology_v1.1.md` superseded by `Auto_Market_Index_Methodology_v2.0.md` in `qg-deploy/docs/`. When shipping Thread 33 code in the next thread, also remove the stale v1.1 file in the same commit per §STOP Rule 6 (version-replacement policy).
+- **New basket doc:** `Auto_Market_Index_Basket_v1.0.md` is shipped alongside the methodology — this is the authoritative enumeration of the 185-current / 200-target model basket. Basket version bumps (v1.1, v1.2...) follow the same version-replacement rule.
+- **Internal naming:** Docs freely use `AMD` (Manheim monthly backfill) and `AMI` (Marketcheck monthly live) as internal labels. UI and public-facing copy must NEVER say "Manheim" or "Cox" — use "Auto Market Data" and "Auto Market Index" exclusively.
+- **No new cron / PM2 / Nginx / SSL changes.** Existing daily AMD refresh cron and weekly AMI background polling remain as-is until Thread 33 build-out formally cuts over to monthly 200-model polling.
+
+### Pre-deploy checklist for the Thread 33 build thread
+
+When the next thread deploys the 13-line UI, it must:
+
+1. Follow the canonical GitHub-first sequence (§4 of this guide).
+2. Run `deploy-guard.sh auto` before touching any file on VPS.
+3. Deploy BOTH the dashboard code changes AND the doc updates (`Auto_Market_Index_Methodology_v2.0.md`, `Auto_Market_Index_Basket_v1.0.md`) in the same commit cadence — code refers to methodology version, so they must land together.
+4. Delete stale `Auto_Market_Index_Methodology_v1.1.md` from both GitHub and VPS `/home/support/qg-deploy-docs/docs/` in the same commit that ships v2.0.
+5. Run `deploy-done.sh auto` — verify HTTP 200 on `http://localhost:5006/health` and `PRAGMA integrity_check` = `ok` on the auto DB.
+6. Smoke test: `curl -sL -H 'x-auth-plan-tier: pro' http://localhost:5006/ | grep -cE 'data-key="(spx|gold|btc)"'` (expect 6). Auto-specific: confirm all 13 trend lines render on the chart with correct legend labels (Entry SUV, Midsize SUV, Fullsize SUV, Luxury SUV, SUV Market Index, Compact Car, Midsize Car, Luxury Car, Sports Car, Car Market Index, Truck Market Index, Van Market Index, Auto Market Index).
+
+### Forbidden (auto dashboard specific, unchanged from v11.0)
+
+- NEVER expose "Manheim" or "Cox" in any user-facing string. Legend, tooltip, footer, source line — all must read "Auto Market Data" for backfill and "Auto Market Index" for the composite.
+- NEVER interpolate missing monthly points. Forward-fill only; gaps are gaps (same rule as HOF / Thread 32).
+- NEVER hardcode API keys outside `server.js` line 164 pattern — `MC_API_KEY` stays there (existing convention).
+
+---
+
+*End of QG-Deployment-Guide-v11.1.md*
