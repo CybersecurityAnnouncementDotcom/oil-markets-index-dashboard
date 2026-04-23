@@ -490,6 +490,34 @@
       .hero-changes { gap: 12px; }
     }
   </style>
+
+<style>
+.qg-hiw{max-width:1100px;margin:32px auto 20px;padding:24px 20px;border-top:1px solid rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06);background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.025));}
+.qg-hiw-title{font-size:18px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:#FFD700;margin:0 0 6px;text-align:center;}
+.qg-hiw-intro{font-size:13px;line-height:1.6;color:#b4b9c4;max-width:780px;margin:0 auto 24px;text-align:center;}
+.qg-hiw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:24px;}
+.qg-hiw-block{padding:16px;border:1px solid rgba(255,255,255,0.06);border-radius:8px;background:rgba(255,255,255,0.02);}
+.qg-hiw-block h4{margin:0 0 8px;font-size:13px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:#e4e7ef;}
+.qg-hiw-block p{margin:0;font-size:13px;line-height:1.6;color:#9fa5b2;}
+.qg-hiw-gl-title{font-size:13px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#FFD700;margin:0 0 10px;text-align:center;opacity:0.9;}
+.qg-hiw-gl{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:6px 18px;max-width:980px;margin:0 auto;padding:12px 16px;border:1px solid rgba(255,255,255,0.06);border-radius:8px;background:rgba(0,0,0,0.15);}
+.qg-hiw-gl-row{display:flex;gap:8px;font-size:12px;line-height:1.5;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.03);}
+.qg-hiw-gl-row:last-child{border-bottom:none;}
+.qg-hiw-gl-term{color:#FFD700;font-weight:600;min-width:80px;flex-shrink:0;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;}
+.qg-hiw-gl-def{color:#9fa5b2;}
+@media (max-width: 600px){
+  .qg-hiw{margin:20px 12px;padding:18px 14px;}
+  .qg-hiw-title{font-size:15px;}
+  .qg-hiw-intro{font-size:12px;}
+  .qg-hiw-grid{grid-template-columns:1fr;gap:10px;}
+  .qg-hiw-block{padding:12px;}
+  .qg-hiw-block h4{font-size:12px;}
+  .qg-hiw-block p{font-size:12px;}
+  .qg-hiw-gl{grid-template-columns:1fr;padding:10px 12px;}
+  .qg-hiw-gl-row{flex-direction:column;gap:2px;}
+  .qg-hiw-gl-term{min-width:0;}
+}
+</style>
 </head>
 <body>
   <div class="container">
@@ -607,6 +635,29 @@
         </div>
       </div>
     </div>
+    <!-- QG How It Works -->
+    <section class="qg-hiw" aria-label="How It Works">
+      <h3 class="qg-hiw-title">How the Oil Markets Index Works</h3>
+      <p class="qg-hiw-intro">The Oil Markets Index (OMI) is a composite tracking global crude and refined-product benchmarks, rolled up from publicly available spot and futures prices.</p>
+      <div class="qg-hiw-grid">
+        <div class="qg-hiw-block"><h4>Composite Math</h4><p>OMI is computed as a weighted geometric mean of normalized price series: each input is indexed to 100 at its base date, then combined using fixed weights that reflect global consumption shares. Geometric mean is used so that a 10% rise in one benchmark and a 10% fall in another cancel cleanly, avoiding the arithmetic-mean drift bias.</p></div>
+<div class="qg-hiw-block"><h4>Forward-Fill Only</h4><p>When a benchmark is missing a print (weekend, holiday, source-side gap), we carry the last known value forward. We never interpolate or smooth — the line holds flat until the next real print arrives.</p></div>
+<div class="qg-hiw-block"><h4>Overlay Comparisons</h4><p>SPX, Gold, USD, and DXY overlays let you view crude relative to other macro anchors. Overlays are independently normalized and toggle on/off without recomputing OMI itself.</p></div>
+<div class="qg-hiw-block"><h4>Time Machine Ranges</h4><p>1D / 1W / 1M / 3M / 1Y / 5Y / MAX. All ranges use the same source data; longer ranges sample at daily granularity, shorter ranges at hourly where available.</p></div>
+      </div>
+      <div class="qg-hiw-gl-title">Glossary</div>
+      <div class="qg-hiw-gl">
+        <div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">WTI</span><span class="qg-hiw-gl-def">West Texas Intermediate — US benchmark crude, delivered at Cushing, OK</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">Brent</span><span class="qg-hiw-gl-def">North Sea Brent — international benchmark crude</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">RBOB</span><span class="qg-hiw-gl-def">Reformulated Blendstock for Oxygenate Blending — US gasoline futures benchmark</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">HO</span><span class="qg-hiw-gl-def">Heating Oil futures — NY Harbor ULSD benchmark</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">NG</span><span class="qg-hiw-gl-def">Natural Gas — Henry Hub futures</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">DXY</span><span class="qg-hiw-gl-def">US Dollar Index — trade-weighted basket of 6 major currencies</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">SPX</span><span class="qg-hiw-gl-def">S&P 500 Index</span></div>
+<div class="qg-hiw-gl-row"><span class="qg-hiw-gl-term">GM</span><span class="qg-hiw-gl-def">Geometric Mean — Nth root of the product of N numbers</span></div>
+      </div>
+    </section>
+
 
     
     <!-- Time Machine Predictions - Bottom -->
