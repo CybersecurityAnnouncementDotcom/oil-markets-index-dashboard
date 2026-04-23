@@ -215,7 +215,7 @@ app.get('/api/history', apiLimiter, requireAuth, (req, res) => {
     if (range === 'MAX' || range === '1Y') {
       readings = db.prepare(`
         SELECT 
-          MIN(timestamp) as timestamp,
+          MAX(timestamp) as timestamp,
           ROUND(AVG(value), 2) as value,
           ROUND(AVG(wti_price), 2) as wti_price,
           ROUND(AVG(brent_price), 2) as brent_price
@@ -314,7 +314,7 @@ app.get('/api/bitcoin-history', apiLimiter, requireAuth, (req, res) => {
     if (range === 'MAX' || range === '1Y') {
       readings = db.prepare(`
         SELECT
-          MIN(timestamp) as timestamp,
+          MAX(timestamp) as timestamp,
           ROUND(AVG(price), 2) as price
         FROM bitcoin_data
         WHERE timestamp >= ?
